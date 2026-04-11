@@ -536,10 +536,13 @@ class TestIncrementalFetch:
         known_time = datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         store.record_fetch("https://blog.test/feed.xml", 3)
         store.reload()
-        # Manually set the time for test precision
-        sub_updated = store.get("https://blog.test/feed.xml")
-        sub_updated.last_fetched_at = known_time
-        store._save()
+        # Directly update last_fetched_at in SQLite for test precision
+        from llm_wiki.db import get_db
+        with get_db(config) as conn:
+            conn.execute(
+                "UPDATE subscriptions SET last_fetched_at = ? WHERE url = ?",
+                (known_time.isoformat(), "https://blog.test/feed.xml"),
+            )
 
         mock_result = FetchResult(ok=True, items=[], source_title="Blog")
         captured_since = []
