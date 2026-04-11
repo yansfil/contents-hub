@@ -1,0 +1,28 @@
+id: frontend-ecosystem
+name: Frontend Ecosystem
+description: >
+  React, Next.js, and modern frontend tooling —
+  new releases, architectural patterns, and production tips.
+keywords:
+  - React
+  - Next.js
+  - TypeScript
+  - Vite
+  - frontend
+  - web components
+  - CSS
+  - server components
+defaultTags:
+  - frontend
+  - dev
+wikiDirectory: topics/frontend
+compileStrategy: per-source
+compileInstructions: >
+  Focus on practical takeaways — code examples, migration steps,
+  gotchas. Skip marketing fluff. Use Korean for main text,
+  keep English technical terms in parentheses.
+sourceIds: []
+priority: 1
+enabled: true
+createdAt: "2024-01-15T10:30:00Z"
+updatedAt: "2024-01-15T10:30:00Z"

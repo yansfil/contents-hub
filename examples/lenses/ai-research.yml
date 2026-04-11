@@ -1,0 +1,29 @@
+id: ai-research
+name: AI Research
+description: >
+  Latest developments in artificial intelligence,
+  focusing on LLM architectures, training techniques,
+  and practical applications of foundation models.
+keywords:
+  - machine learning
+  - transformer
+  - LLM
+  - deep learning
+  - neural network
+  - retrieval-augmented generation
+  - fine-tuning
+defaultTags:
+  - ai
+  - research
+wikiDirectory: topics/ai-research
+compileStrategy: merge
+compileInstructions: >
+  Write in clear technical prose. Include paper references
+  where applicable. Link to related concepts with [[wikilinks]].
+  When multiple sources cover the same topic, synthesize into
+  a single comprehensive page rather than listing summaries.
+sourceIds: []
+priority: 0
+enabled: true
+createdAt: "2024-01-15T10:30:00Z"
+updatedAt: "2024-01-15T10:30:00Z"

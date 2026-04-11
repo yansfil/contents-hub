@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Cache
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# State (user-specific)
+.llm-wiki/state.db*
+
+# Node (if any)
+node_modules/

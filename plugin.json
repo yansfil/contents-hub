@@ -1,0 +1,26 @@
+{
+  "name": "llm-wiki",
+  "version": "0.1.0",
+  "description": "Personal knowledge management tool — collect sources, compile wiki with LLM, all in Obsidian vault",
+  "commands": [
+    "commands/collect.md",
+    "commands/subscribe.md",
+    "commands/fetch-all.md",
+    "commands/open.md",
+    "commands/search.md",
+    "commands/lint.md",
+    "commands/compile.md"
+  ],
+  "skills": [
+    "skills/tick.md",
+    "skills/compile.md",
+    "skills/auto-fetch.md",
+    "skills/pipeline.md"
+  ],
+  "agents": [
+    "agents/browser-collector.md",
+    "agents/rss-collector.md",
+    "agents/youtube-collector.md",
+    "agents/twitter-collector.md"
+  ]
+}
