@@ -1,4 +1,4 @@
-"""Tests for the CLI entry point (add, remove, list subcommands)."""
+"""Tests for the CLI entry point (add, remove, list, sub, lens subcommands)."""
 
 from __future__ import annotations
 
@@ -120,9 +120,52 @@ class TestBuildParser:
         with pytest.raises(SystemExit):
             parser.parse_args(["add", "https://example.com", "--type", "email"])
 
+    # ── sub command group ─────────────────────────────────────────────
+    def test_sub_add_parses(self):
+        parser = build_parser()
+        args = parser.parse_args(["sub", "add", "https://example.com/feed.xml", "--lens", "ai"])
+        assert args.command == "sub"
+        assert args.sub_command == "add"
+        assert args.url == "https://example.com/feed.xml"
+        assert args.lenses == ["ai"]
+
+    def test_sub_remove_parses(self):
+        parser = build_parser()
+        args = parser.parse_args(["sub", "remove", "https://example.com/feed.xml"])
+        assert args.command == "sub"
+        assert args.sub_command == "remove"
+
+    def test_sub_list_parses(self):
+        parser = build_parser()
+        args = parser.parse_args(["sub", "list", "--type", "rss", "--status", "active"])
+        assert args.command == "sub"
+        assert args.sub_command == "list"
+        assert args.source_type == "rss"
+        assert args.status == "active"
+
+    # ── lens command group ────────────────────────────────────────────
+    def test_lens_create_parses(self):
+        parser = build_parser()
+        args = parser.parse_args([
+            "lens", "create", "ai-research",
+            "--name", "AI Research",
+            "--keywords", "LLM,transformer",
+        ])
+        assert args.command == "lens"
+        assert args.lens_command == "create"
+        assert args.lens_id == "ai-research"
+        assert args.name == "AI Research"
+        assert args.keywords == "LLM,transformer"
+
+    def test_lens_list_parses(self):
+        parser = build_parser()
+        args = parser.parse_args(["lens", "list"])
+        assert args.command == "lens"
+        assert args.lens_command == "list"
+
 
 # ---------------------------------------------------------------------------
-# Integration tests (main function)
+# Integration tests (main function) — Legacy add/remove/list
 # ---------------------------------------------------------------------------
 
 
@@ -245,6 +288,144 @@ class TestMainList:
         captured = capsys.readouterr()
         data = json.loads(captured.out)
         assert data == []
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — sub command group
+# ---------------------------------------------------------------------------
+
+
+class TestSubAdd:
+    def test_sub_add_success(self, vault: Path, capsys):
+        code = main(["--vault", str(vault), "sub", "add", "https://example.com/feed.xml", "--title", "Blog", "--lens", "ai"])
+        assert code == 0
+        captured = capsys.readouterr()
+        assert "Added: https://example.com/feed.xml" in captured.out
+        assert "ai" in captured.out
+
+    def test_sub_add_duplicate_fails(self, vault: Path, capsys):
+        main(["--vault", str(vault), "sub", "add", "https://example.com/feed.xml"])
+        code = main(["--vault", str(vault), "sub", "add", "https://example.com/feed.xml"])
+        assert code == 1
+        captured = capsys.readouterr()
+        assert "Already subscribed" in captured.err
+
+
+class TestSubRemove:
+    def test_sub_remove_success(self, vault: Path, capsys):
+        main(["--vault", str(vault), "sub", "add", "https://example.com/feed.xml", "--title", "Blog"])
+        code = main(["--vault", str(vault), "sub", "remove", "https://example.com/feed.xml"])
+        assert code == 0
+        captured = capsys.readouterr()
+        assert "Removed:" in captured.out
+
+
+class TestSubList:
+    def test_sub_list_empty(self, vault: Path, capsys):
+        code = main(["--vault", str(vault), "sub", "list"])
+        assert code == 0
+        captured = capsys.readouterr()
+        assert "No subscriptions found" in captured.out
+
+    def test_sub_list_with_filters(self, vault: Path, capsys):
+        main(["--vault", str(vault), "sub", "add", "https://example.com/feed.xml", "--title", "RSS"])
+        main(["--vault", str(vault), "sub", "add", "https://youtube.com/@ch", "--title", "YT"])
+        capsys.readouterr()
+        code = main(["--vault", str(vault), "sub", "list", "--type", "rss"])
+        assert code == 0
+        captured = capsys.readouterr()
+        assert "RSS" in captured.out
+        assert "YT" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — lens command group
+# ---------------------------------------------------------------------------
+
+
+class TestLensCreate:
+    def test_lens_create_success(self, vault: Path, capsys):
+        code = main([
+            "--vault", str(vault),
+            "lens", "create", "ai-research",
+            "--name", "AI Research",
+            "--keywords", "LLM,transformer,AI",
+        ])
+        assert code == 0
+        captured = capsys.readouterr()
+        assert "Created lens: ai-research" in captured.out
+        assert "AI Research" in captured.out
+        assert "LLM" in captured.out
+
+    def test_lens_create_duplicate_fails(self, vault: Path, capsys):
+        main([
+            "--vault", str(vault),
+            "lens", "create", "ai-research",
+            "--name", "AI Research",
+        ])
+        code = main([
+            "--vault", str(vault),
+            "lens", "create", "ai-research",
+            "--name", "AI Research 2",
+        ])
+        assert code == 1
+        captured = capsys.readouterr()
+        assert "already exists" in captured.err
+
+    def test_lens_create_invalid_id_fails(self, vault: Path, capsys):
+        code = main([
+            "--vault", str(vault),
+            "lens", "create", "INVALID-ID",
+            "--name", "Bad Lens",
+        ])
+        assert code == 1
+        captured = capsys.readouterr()
+        assert "Error" in captured.err
+
+
+class TestLensList:
+    def test_lens_list_empty(self, vault: Path, capsys):
+        code = main(["--vault", str(vault), "lens", "list"])
+        assert code == 0
+        captured = capsys.readouterr()
+        assert "No lenses found" in captured.out
+
+    def test_lens_list_with_lenses(self, vault: Path, capsys):
+        main([
+            "--vault", str(vault),
+            "lens", "create", "ai-research",
+            "--name", "AI Research",
+            "--keywords", "LLM,transformer",
+        ])
+        main([
+            "--vault", str(vault),
+            "lens", "create", "frontend",
+            "--name", "Frontend Dev",
+            "--keywords", "React,CSS",
+        ])
+        capsys.readouterr()
+        code = main(["--vault", str(vault), "lens", "list"])
+        assert code == 0
+        captured = capsys.readouterr()
+        assert "ai-research" in captured.out
+        assert "frontend" in captured.out
+        assert "Total: 2" in captured.out
+
+    def test_lens_list_json(self, vault: Path, capsys):
+        main([
+            "--vault", str(vault),
+            "lens", "create", "ai-research",
+            "--name", "AI Research",
+            "--keywords", "LLM,transformer",
+        ])
+        capsys.readouterr()
+        code = main(["--vault", str(vault), "lens", "list", "--format", "json"])
+        assert code == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert len(data) == 1
+        assert data[0]["id"] == "ai-research"
+        assert "LLM" in data[0]["keywords"]
 
 
 class TestMainVaultResolution:
