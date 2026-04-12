@@ -466,3 +466,61 @@ class TestRunLoop:
         )
 
         assert tick_count == 3
+
+
+# ---------------------------------------------------------------------------
+# R1.1: BROKEN status after 2 consecutive failures
+# ---------------------------------------------------------------------------
+
+
+class TestBrokenStatusTransition:
+    """R1.1: After 2 consecutive failures → BROKEN + excluded from ticks."""
+
+    def test_max_consecutive_errors_is_two(self):
+        assert MAX_CONSECUTIVE_ERRORS == 2
+
+    def test_broken_status_exists(self):
+        from llm_wiki.subscriptions import SubscriptionStatus
+        assert SubscriptionStatus.BROKEN.value == "broken"
+
+    def test_first_failure_stays_error(
+        self, store: SubscriptionStore, config: WikiConfig,
+    ):
+        from llm_wiki.subscriptions import SubscriptionStatus
+
+        url = "https://fail.example.com/feed.xml"
+        store.add(url, title="Fail")
+        store.record_fetch(url, item_count=0, error="timeout")
+
+        sub = store.get(url)
+        assert sub.status == SubscriptionStatus.ERROR
+
+    def test_second_failure_transitions_to_broken(
+        self, store: SubscriptionStore, config: WikiConfig,
+    ):
+        from llm_wiki.subscriptions import SubscriptionStatus
+
+        url = "https://fail.example.com/feed.xml"
+        store.add(url, title="Fail")
+        store.record_fetch(url, item_count=0, error="timeout")
+        store.record_fetch(url, item_count=0, error="timeout again")
+
+        sub = store.get(url)
+        assert sub.status == SubscriptionStatus.BROKEN
+
+    def test_broken_subscription_excluded_from_tick(
+        self, engine: SchedulerEngine, store: SubscriptionStore, config: WikiConfig,
+    ):
+        url = "https://fail.example.com/feed.xml"
+        _add_and_dispatch(store, config, url, "Fail")
+
+        # Force two failures to mark as BROKEN
+        store.record_fetch(url, item_count=0, error="timeout")
+        store.record_fetch(url, item_count=0, error="timeout")
+
+        # Tick far in future — next_run_at will have passed
+        far_future = datetime(2099, 1, 1, tzinfo=timezone.utc)
+        result = engine.tick(now=far_future)
+
+        assert result.due_count == 0
+        assert result.skipped_max_errors >= 1
