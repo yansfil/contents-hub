@@ -107,9 +107,9 @@ class TestRSSMappedTypes:
 
     def test_generic_rss_url(self):
         route = resolve_source("https://blog.example.com/feed.xml")
-        assert route.content_type == "webpage"
+        assert route.content_type == "rss"
         assert route.collector_type == "rss"
-        assert route.matched_by == "fallback"
+        assert route.matched_by == "fallback_feed_pattern"
 
 
 # ---------------------------------------------------------------------------
@@ -150,15 +150,15 @@ class TestBrowserMappedTypes:
 
 
 class TestFallback:
-    def test_unknown_http_url_defaults_to_rss(self):
+    def test_unknown_http_url_defaults_to_browser(self):
         route = resolve_source("https://unknown-blog.example.com/posts")
         assert route.content_type == "webpage"
-        assert route.collector_type == "rss"
+        assert route.collector_type == "browser"
         assert route.matched_by == "fallback"
 
     def test_non_http_defaults_to_browser(self):
         route = resolve_source("file:///path/to/local/page.html")
-        assert route.content_type == "browser"
+        assert route.content_type == "webpage"
         assert route.collector_type == "browser"
         assert route.matched_by == "fallback"
 
@@ -366,7 +366,11 @@ class TestConvenienceFunctions:
         assert detect_source_type("https://youtube.com/@test") == "youtube"
         assert detect_source_type("https://x.com/user") == "twitter"
         assert detect_source_type("https://github.com/user/repo") == "browser"
-        assert detect_source_type("https://example.com/article") == "rss"
+        # Unknown HTTP URLs now default to browser (auto-detects RSS via BrowserFetcher)
+        assert detect_source_type("https://unknown.example.com") == "browser"
+        assert detect_source_type("https://example.com/article") == "browser"
+        # Feed-like URLs still route to RSS
+        assert detect_source_type("https://example.com/feed.xml") == "rss"
 
     def test_detect_content_type_returns_content(self):
         """detect_content_type returns the granular content_type."""

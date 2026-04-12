@@ -84,13 +84,13 @@ class TestCollectedItem:
         item = CollectedItem(
             url="https://example.com",
             title="Test",
-            source_type=SourceType.BROWSER,
+            source_type=SourceType.WEBPAGE,
             tags=["search"],
         )
         json_str = json.dumps(item.to_dict())
         restored = CollectedItem.from_dict(json.loads(json_str))
         assert restored.url == item.url
-        assert restored.source_type == SourceType.BROWSER
+        assert restored.source_type == SourceType.WEBPAGE
 
 
 # ---------------------------------------------------------------------------

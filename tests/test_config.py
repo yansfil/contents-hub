@@ -21,7 +21,7 @@ class TestScheduleConfig:
         assert cfg.interval_for("rss") == 30
         assert cfg.interval_for("youtube") == 60
         assert cfg.interval_for("twitter") == 15
-        assert cfg.interval_for("browser") == 0
+        assert cfg.interval_for("webpage") == 1440
 
     def test_custom_defaults(self):
         cfg = ScheduleConfig(defaults={"rss": 10, "youtube": 120, "twitter": 15, "browser": 0})

@@ -74,7 +74,7 @@ def sample_browser_item() -> CollectedItem:
     return CollectedItem(
         url="https://docs.python.org/3/tutorial/",
         title="Python Tutorial",
-        source_type=SourceType.BROWSER,
+        source_type=SourceType.WEBPAGE,
         content="An informal introduction to Python...",
         tags=["python", "tutorial"],
         lenses=["programming"],
@@ -107,6 +107,8 @@ class TestFormatItem:
 
     def test_browser_format(self, sample_browser_item: CollectedItem):
         md = _format_item(sample_browser_item)
+        # format_extracted_page writes the legacy 'browser' literal in the
+        # frontmatter regardless of whether the enum is WEBPAGE or BROWSER.
         assert "source_type: browser" in md
         assert "Python Tutorial" in md
 
@@ -125,14 +127,14 @@ class TestFormatItem:
         item = CollectedItem(
             url="https://example.com",
             title="Generic Page",
-            source_type=SourceType.BROWSER,
+            source_type=SourceType.WEBPAGE,
             content="Some content",
             tags=["test"],
             lenses=["research"],
         )
         md = _format_generic_item(item)
         assert "---" in md
-        assert "source_type: browser" in md
+        assert "source_type: webpage" in md
         assert "Generic Page" in md
         assert "test" in md
 

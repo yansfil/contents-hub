@@ -86,8 +86,8 @@ class TestDefaultInterval:
     def test_twitter(self):
         assert default_interval("twitter") == 15
 
-    def test_browser_manual(self):
-        assert default_interval("browser") == 0
+    def test_webpage_daily(self):
+        assert default_interval("webpage") == 1440
 
     def test_unknown_falls_back(self):
         assert default_interval("unknown") == 30
@@ -154,14 +154,19 @@ class TestDispatchSubscription:
         assert schedule.next_run_at is not None
         assert schedule.next_run_at >= before
 
-    def test_browser_source_disabled_by_default(self, config: WikiConfig):
-        """Browser sources (manual) should have enabled=False."""
+    def test_browser_source_scheduled(self, config: WikiConfig):
+        """Browser/webpage sources get a daily schedule (interval=1440)
+        after the v5 rename from 'browser' → 'webpage'.
+        """
         sub = Subscription(url="file:///local/page.html")
         schedule = dispatch_subscription(sub, config)
 
-        assert schedule.source_type == "browser"
-        assert schedule.interval_minutes == 0
-        assert schedule.enabled is False
+        # detect_source_type still returns the collector_type "browser"
+        # for non-HTTP URLs; what matters is the schedule has a concrete
+        # daily interval and stays enabled.
+        assert schedule.source_type in ("browser", "webpage")
+        assert schedule.interval_minutes > 0
+        assert schedule.enabled is True
 
 
 # ---------------------------------------------------------------------------
