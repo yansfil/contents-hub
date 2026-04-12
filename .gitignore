@@ -29,3 +29,9 @@ venv/
 
 # Node (if any)
 node_modules/
+
+# llm-wiki runtime state (keep bundled plugins under .llm-wiki/plugins/)
+.llm-wiki/state.db*
+.llm-wiki/*.log
+.llm-wiki/scheduled_tasks.lock
+.claude/scheduled_tasks.lock
