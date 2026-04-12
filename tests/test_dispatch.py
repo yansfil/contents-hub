@@ -311,6 +311,40 @@ class TestRecordRunResult:
         # Second backoff should push next_run further out
         assert s2.next_run_at > s1.next_run_at
 
+    def test_last_run_at_unchanged_after_failure(self, config: WikiConfig):
+        """R2.1: last_run_at must NOT advance on a failed run."""
+        sub = Subscription(url="https://example.com/feed.xml")
+        dispatch_subscription(sub, config)
+
+        # First, a successful run sets last_run_at.
+        record_run_result(sub.url, config, ok=True, new_items=2)
+        after_success = get_schedule(sub.url, config)
+        t0 = after_success.last_run_at
+        assert t0 is not None
+
+        # A failure must NOT update last_run_at.
+        record_run_result(sub.url, config, ok=False, error="boom")
+        after_failure = get_schedule(sub.url, config)
+        assert after_failure.last_run_at == t0
+        assert after_failure.last_run_ok is False
+        assert after_failure.last_error == "boom"
+        assert after_failure.consecutive_errors == 1
+
+    def test_last_run_at_updates_after_success(self, config: WikiConfig):
+        """R2.1: last_run_at advances on a successful run."""
+        sub = Subscription(url="https://example.com/feed.xml")
+        dispatch_subscription(sub, config)
+
+        record_run_result(sub.url, config, ok=False, error="boom")
+        after_failure = get_schedule(sub.url, config)
+        # No prior success → last_run_at should still be unset.
+        assert after_failure.last_run_at is None
+
+        record_run_result(sub.url, config, ok=True, new_items=1)
+        after_success = get_schedule(sub.url, config)
+        assert after_success.last_run_at is not None
+        assert after_success.last_run_ok is True
+
     def test_success_resets_errors(self, config: WikiConfig):
         sub = Subscription(url="https://example.com/feed.xml")
         dispatch_subscription(sub, config)

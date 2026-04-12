@@ -111,6 +111,26 @@ class TestSubscription:
         assert sub.status == SubscriptionStatus.ERROR
         assert sub.error_message == "HTTP 503"
 
+    def test_record_fetch_error_does_not_touch_last_fetched_at(self):
+        """R2.1: failed runs must NOT update last_fetched_at."""
+        sub = Subscription(url="https://example.com/feed.xml")
+        sub.record_fetch(item_count=3)  # success
+        t0 = sub.last_fetched_at
+        assert t0 is not None
+        sub.record_fetch(item_count=0, error="HTTP 503")  # failure
+        assert sub.last_fetched_at == t0
+        assert sub.status == SubscriptionStatus.ERROR
+
+    def test_record_fetch_success_updates_last_fetched_at(self):
+        """R2.1: successful runs update last_fetched_at."""
+        sub = Subscription(url="https://example.com/feed.xml")
+        assert sub.last_fetched_at is None
+        sub.record_fetch(item_count=0, error="boom")
+        # Failure with no prior success must leave last_fetched_at unset.
+        assert sub.last_fetched_at is None
+        sub.record_fetch(item_count=2)
+        assert sub.last_fetched_at is not None
+
     def test_record_fetch_clears_error(self):
         sub = Subscription(url="https://example.com/feed.xml")
         sub.record_fetch(item_count=0, error="Timeout")
@@ -460,6 +480,19 @@ class TestStoreUpdate:
         sub = store.get("https://a.com/feed")
         assert sub.status == SubscriptionStatus.ERROR
         assert sub.error_message == "Timeout"
+
+    def test_record_fetch_error_preserves_last_fetched_at(
+        self, store: SubscriptionStore
+    ):
+        """R2.1 (store): failed runs do NOT update last_fetched_at."""
+        store.add("https://a.com/feed")
+        store.record_fetch("https://a.com/feed", item_count=3)  # success
+        t0 = store.get("https://a.com/feed").last_fetched_at
+        assert t0 is not None
+        store.record_fetch("https://a.com/feed", item_count=0, error="Timeout")
+        sub = store.get("https://a.com/feed")
+        assert sub.last_fetched_at == t0
+        assert sub.status == SubscriptionStatus.ERROR
 
     def test_needs_fetch(self, store: SubscriptionStore):
         store.add("https://a.com/feed")
