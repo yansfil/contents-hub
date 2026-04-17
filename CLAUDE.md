@@ -4,121 +4,119 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Claude Code plugin + Python package (`llm_wiki`) that turns an Obsidian vault into a personal knowledge base. The user subscribes to RSS/YouTube/Twitter/webpages; a scheduler collects new items into immutable source files; an LLM compile step synthesizes them into wiki pages with wikilinks and tags.
+A Python tool (`llm_wiki`) that collects sources into an Obsidian vault. The user subscribes to RSS/YouTube/Twitter/webpages/LinkedIn; a scheduler daemon polls them on a cron, deduplicates, and stores the raw items. There is a FastAPI web dashboard for subscription management and an opinionated "browser fetcher" that uses the Claude Agent SDK + chromux to scrape sites that don't offer an RSS feed.
 
-The repo wears three hats simultaneously, and edits often need to keep all three consistent:
-
-1. **A Claude Code plugin** — `plugin.json` at the root registers `commands/`, `skills/`, `agents/`. These are the user-facing surface (`/collect`, `/compile`, `/search`, `/pipeline`, `/tick`, etc.) and they invoke the Python package via bash.
-2. **A Python package** (`src/llm_wiki/`) — the actual implementation. Invoked as `python -m llm_wiki <subcommand>` or imported from skill/agent shell snippets.
-3. **A FastAPI dashboard** (`src/llm_wiki/web/app.py`) — a separate UI launched by `./dev web`.
+**Scope note (0.2).** This repo was aggressively simplified — the former LLM "compile" pipeline (source → synthesized wiki page), lens routing, classify/promote, lint, semantic search, and the Claude Code plugin surface (commands/skills/agents) were all removed. The `pre-simplify-backup` branch preserves them if any feature needs to be restored.
 
 ## Common commands
 
-All dev tasks go through the `./dev` wrapper (it uses `uv` to run inside the project venv):
+Use the `./dev` wrapper — it runs inside `uv`'s venv.
 
 ```
 ./dev web              # FastAPI dashboard on http://localhost:8585
-./dev web --port 9000  # override port
-./dev daemon           # scheduler daemon loop
-./dev test             # pytest (pytest args passthrough: ./dev test -k foo -x)
-./dev sync             # uv sync --all-extras (after pulling)
+./dev daemon           # scheduler daemon loop (foreground)
+./dev test             # pytest (arg passthrough)
+./dev sync             # uv sync --all-extras
 ```
 
-Skills/agents that shell out to Python expect `.venv/bin/python` (not `uv run`) — e.g. `cd ${CLAUDE_PLUGIN_ROOT} && .venv/bin/python -m llm_wiki ...`. Run `./dev sync` to create/refresh `.venv`.
+Single test: `./dev test tests/test_rss.py::TestCase::test_name`.
 
-Single test: `./dev test tests/test_compile_orchestrator.py::TestName::test_case`.
+`pyproject.toml` sets `asyncio_mode = "auto"`, so `async def` tests don't need `@pytest.mark.asyncio`.
 
-Pytest is configured with `asyncio_mode = "auto"` (see `pyproject.toml`), so `async def` tests don't need `@pytest.mark.asyncio`.
-
-There is no lint/format command wired up. `.ruff_cache/` exists but no ruff config is in `pyproject.toml`.
+No linter is wired up. `.ruff_cache/` exists but no ruff config in `pyproject.toml`.
 
 ## CLI surface
 
 `python -m llm_wiki` subcommands (`src/llm_wiki/cli.py`):
 
-- `collect` — save a URL/text/memo/file as a source (see `collect_cli.py`)
-- `sub {add,remove,list}` — subscription CRUD (SQLite-backed via `subscriptions.py`)
-- `lens {create,list}` — lens CRUD (SQLite-backed via `lens_store.py`)
-- `daemon {run,loop,install,uninstall,status}` — scheduled fetch; `install` registers a macOS launchd job (`launchd.py`)
-- `classify` — promote `raw_items` to source files by matching against lenses (`classifier.py`)
-- `pipeline` / `pipe` — build a compile plan from pending sources (`pipeline.build_compile_plan`)
-- `web --port 8585` — launch the FastAPI dashboard
+- `init [path]` — scaffold a new vault (`.llm-wiki/`, `sources/`, SQLite schema)
+- `sub {add,remove,list}` — subscription CRUD
+- `daemon {run,loop,install,uninstall,status}` — background collector; `install` writes a macOS launchd plist (`launchd.py`)
+- `web [--port N]` — launch the FastAPI dashboard
 
-Every subcommand accepts `--vault PATH`. Without it, vault is resolved from `$LLM_WIKI_VAULT`, then CWD (`config.resolve_vault_path`).
+Every subcommand accepts `--vault PATH`. Fallback order: explicit `--vault`, then `$LLM_WIKI_VAULT`, then CWD (`config.resolve_vault_path`).
 
-## Vault layout (written to the user's Obsidian vault, not this repo)
+## Vault layout (user's Obsidian vault, not this repo)
 
 ```
 <vault>/
 ├── .llm-wiki.yaml            # user config (schedule defaults, etc.)
 ├── .llm-wiki/
-│   ├── state.db              # SQLite (subscriptions, schedules, raw_items, job_runs, pending_confirmations, embeddings...)
+│   ├── state.db              # SQLite: subscriptions, raw_items, schedules, job_runs, lenses
 │   ├── cli.log / daemon.log / web.log
-│   └── plugins/              # locally-bundled sub-plugins (e.g. llm-wiki-browser)
-├── sources/                  # immutable collected items (frontmatter + body)
-└── <lens.wikiDirectory>/     # compiled wiki pages, one per lens
+│   └── plugins/              # optional: bundled sub-plugins (chromux browser-explorer)
+├── sources/                  # (future) promoted source files
+└── ...
 ```
 
-`sources/` is **append-only**. Files are marked `status: pending` when collected and `status: compiled` after the compile step writes the wiki page.
+The `sources/` directory is still the intended landing zone for promoted items, but the promotion pipeline (raw_items → sources/) moved out with the simplification. The daemon currently populates `raw_items` and stops there.
 
-## Pipeline architecture
-
-The three pipeline stages are strictly separated — do not blend them:
+## Architecture — 3 layers
 
 ```
- fetch (collectors/) ─► sources/*.md ─► evaluate ─► LLM compile ─► execute ─► wiki/*.md
-                          ▲                          (in skill)      (writer)
-                          │
-                       collect (CLI / webhook)
+ subscriptions       ─► fetchers         ─► raw_items (SQLite)
+ (SubscriptionStore)   (RSS/YouTube/
+                        Twitter/Browser)
 ```
 
-Key design rule: **LLM compilation is NOT in `pipeline.py`** — it happens inside the `/compile` skill, where Claude has direct access to source content. `pipeline.py` orchestrates everything *around* the LLM call (scanning, evaluating, executing the decisions). See the module docstring in `src/llm_wiki/pipeline.py` for the contract.
+### Fetchers (`src/llm_wiki/fetchers/`)
 
-Stage modules:
+- `rss.py` / `youtube.py` — fast path, pure HTTP. Return `FetchedItem[]`. No agent, no tokens.
+- `twitter.py` — Nitter-RSS with chromux fallback.
+- `browser.py` — **the interesting one**. 3-mode recipe-driven agent fetch via `AgentRunner`:
+  - **EXPLORE**: no recipe yet → agent visits the site, writes a LIST/CONTENT/METADATA recipe, saves as override.
+  - **EXECUTE**: recipe exists (seed or override) → agent follows it, returns items.
+  - **RELEARN**: ≥3 consecutive failures → agent rewrites the recipe.
+- `registry.py` — `source_type → fetcher` factory. Used by `daemon._collect_subscription`.
 
-- **Fetch** — `collectors/` (rss, youtube, twitter, browser) produce `FetchedItem[]`. Orchestrated by `daemon.py`, `fetch_all.py`, `scheduler_engine.py`.
-- **Sources** — `source_writer.py`, `collect_cli.py`, `collect.py` write to `sources/`.
-- **Evaluate** — `compile_evaluate.py` reads a source, searches the existing vault (`compile_search.py`, `vault_search.py`, `bm25.py`, `embeddings.py`, `vector_store.py`), and emits `EvaluationResult` with a `Decision` (CREATE / UPDATE / SKIP).
-- **Compile orchestration** — `compile_orchestrator.py` groups evaluations by lens + `compileStrategy` (merge / per-source / append) into a tiered plan. Tier 0 runs before tier 1; jobs inside a tier can run concurrently.
-- **Preview / confirm** — `preview.py`, `confirmation.py`, `approval.py`. Confirmations can be interrupted and resumed (`pending_confirmations` table).
-- **Execute** — `compile_executor.execute_decisions()` dispatches CREATE → `note_creator.create_note()` (Write) and UPDATE → `note_updater.update_note()` (Edit). Missing-target UPDATE falls back to CREATE.
+### Runners (`src/llm_wiki/runners/`)
 
-### Lenses
+Thin abstraction so the agent backend can be swapped.
 
-A lens is a user-defined topic bucket (`examples/lenses/ai-research.yml`). It controls:
-- `wikiDirectory` — where compiled pages live (e.g. `topics/ai-research`)
-- `compileStrategy` — `merge` (default, one page per topic), `per-source` (one page per source), `append` (running log)
-- `defaultTags`, `keywords`, `compileInstructions` (injected into the LLM prompt)
-- `priority` — lower numbers compile first across tiers
+- `base.AgentRunner` protocol — `run(prompt, *, max_turns, timeout) -> str`.
+- `claude_sdk.ClaudeSDKRunner` — the only concrete implementation. Wraps `claude_agent_sdk.query()`, loads the bundled `llm-wiki-browser` plugin if discoverable, runs under `bypassPermissions`.
+- `get_default_runner()` / `set_default_runner()` — process-wide singleton + test override.
 
-Routing (`routing.py`, `source_router.py`) maps each source to one or more lenses, primarily by matching keywords/tags.
+**Rule**: if you need an agent, call `get_default_runner().run(...)`. Do not import `claude_agent_sdk` from anywhere except `runners/claude_sdk.py`.
 
-## Plugin, skill, and agent surface
+### Recipes (`src/llm_wiki/recipes/`)
 
-`plugin.json` is the registry. When editing anything under `commands/`, `skills/`, or `agents/`, add/remove it there too — Claude Code only loads what's listed.
+Natural-language instructions for the agent. Not code.
 
-- **Commands** (`commands/*.md`) are slash commands. Frontmatter declares `allowed-tools`. Body is a prompt template with instructions to shell out.
-- **Skills** (`skills/*.md`) are multi-step workflows that wrap commands. They own the preview/confirm flow and the LLM compilation step that `pipeline.py` intentionally leaves out.
-- **Agents** (`agents/*.md`) are subagent specs used by `/tick` to collect one source type each. The browser-collector uses `chromux` CLI for Google + page scraping.
+- `seed/{source_type}.md` — built-in recipes for common platforms (linkedin, reddit, substack, medium, twitter, youtube, rss).
+- `templates/{explore,execute,relearn}_prompt.md` — the prompt skeleton injected into each agent run.
+- `RecipeRegistry` (`__init__.py`) — resolves recipe order: subscription-config override → seed.
 
-Shell snippets in skill/command bodies use `${CLAUDE_PLUGIN_ROOT}` to reach this repo and read `$LLM_WIKI_VAULT` (or default to `.`) to reach the user's vault.
+The subscription's `config.recipe` field is mutated in place when EXPLORE/RELEARN produces a new recipe.
+
+### Daemon (`src/llm_wiki/daemon.py`)
+
+- `daemon_tick(config)` — one cycle: query due subscriptions → dispatch to `_collect_{youtube,browser,rss}` → dedup via `raw_items.url UNIQUE` → update subscription state.
+- `daemon_loop(config, interval_minutes)` — tick forever.
+- `launchd.py` — generates/installs a macOS LaunchAgent plist that runs `python -m llm_wiki daemon loop`. Linux/Windows not supported.
 
 ## Database
 
-SQLite at `<vault>/.llm-wiki/state.db`. Schema is defined inline in `src/llm_wiki/db.py` with `SCHEMA_VERSION = 5`; migrations are one-off scripts in `scripts/` (e.g. `migrate_v5.py`). If you change the schema, bump `SCHEMA_VERSION` and write a migration script — do not silently mutate existing tables.
+SQLite at `<vault>/.llm-wiki/state.db`. Schema is defined inline in `src/llm_wiki/db.py` with `SCHEMA_VERSION = 5`. Migration scripts are one-offs in `scripts/`.
 
-Main tables: `subscriptions`, `schedules`, `schedule_runs`, `raw_items`, `job_runs`, `fetch_cursors`, `lenses`, `pending_confirmations`, `embeddings`.
+Tables used by the surviving code: `subscriptions`, `schedules`, `schedule_runs`, `raw_items`, `fetch_cursors`, `job_runs`. The `lenses` / `raw_item_lenses` tables still exist in the schema (not migrated out) but nothing writes to them anymore.
 
-## Configuration gotchas
+## Web UI (`src/llm_wiki/web/`)
 
-- `.llm-wiki.yaml` in the **vault root** (not this repo) supplies `schedule.defaults`, `schedule.global_interval`, `schedule.global_cron`. See `config.ScheduleConfig`.
-- Semantic search (`/search --semantic`) requires `OPENAI_API_KEY` or `VOYAGE_API_KEY`; falls back to BM25 otherwise.
-- The browser-collector and `twitter` fetcher depend on external `chromux` CLI being on PATH.
-- The daemon's macOS install writes a launchd plist via `launchd.py` — do not use for Linux.
+FastAPI + Jinja2. Routes:
+
+- `GET /` — overview (counts, recently saved)
+- `GET /subscriptions`, `POST /subscriptions/add`, `POST /subscriptions/classify` (live-classify URL)
+- `GET /subscriptions/{id}` — detail (recipe, schedule, history, raw items)
+- `POST /subscriptions/{id}/collect|relearn|schedule|delete|open_login|confirm_auth`
+
+The "fetch now" and "relearn" buttons both go through the same `BrowserFetcher` the daemon uses — single source of truth.
 
 ## Conventions worth preserving
 
-- **Sources are immutable.** Never modify a file under `sources/` after creation. Fixes go to the compiled wiki page, not the source.
-- **One concern per module.** The file list in `src/llm_wiki/` is long but flat on purpose — resist the urge to build package subdirectories (the existing `collectors/`, `fetchers/`, `recipes/`, `web/` are the only allowed groupings).
-- **Frontmatter is centralized.** All YAML frontmatter reads/writes go through `llm_wiki.frontmatter` (`parse_frontmatter`, `assemble_markdown`, `update_file_frontmatter`). Don't hand-roll YAML emission.
-- **Tests mirror modules.** `src/llm_wiki/foo.py` ↔ `tests/test_foo.py`. When adding a new module, add a test file even if it only covers imports.
+- **One AgentRunner call-site pattern.** `fetchers/browser.py:_run_agent()` is the only wrapper. All agent traffic funnels through it.
+- **Recipe drift is OK.** EXPLORE/RELEARN overwriting a seed is intentional — the seed is a starting point, not a contract. If a seed update looks better than the stored override, the user resets via the web UI (`/subscriptions/{id}/relearn`) or by clearing `config.recipe`.
+- **Sources are immutable (future state).** When the promotion pipeline comes back, anything written to `sources/` must not be mutated.
+- **Frontmatter via `llm_wiki.frontmatter`.** No hand-rolled YAML serialization elsewhere.
+- **Flat module layout.** Only `collectors/`, `fetchers/`, `recipes/`, `runners/`, `web/` are allowed subpackages.
+- **Agent-agnostic direction.** New agent logic should go through `AgentRunner`. Phase B is to add a `ClaudeCodeRunner` / `CodexRunner` under `runners/`; the core logic should not know which is active.
