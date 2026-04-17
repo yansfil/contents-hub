@@ -77,7 +77,7 @@ Thin abstraction so the agent backend can be swapped.
 - `claude_sdk.ClaudeSDKRunner` — the only concrete implementation. Wraps `claude_agent_sdk.query()`, loads the bundled `llm-wiki-browser` plugin if discoverable, runs under `bypassPermissions`.
 - `get_default_runner()` / `set_default_runner()` — process-wide singleton + test override.
 
-**Rule**: if you need an agent, call `get_default_runner().run(...)`. Do not import `claude_agent_sdk` from anywhere except `runners/claude_sdk.py`.
+**Rule**: if you need an LLM — whether a multi-turn agent with tools (browser fetch) or a single-turn classifier (filter.py) — call `get_default_runner().run(...)`. Do not import `claude_agent_sdk` or `anthropic` from anywhere except `runners/claude_sdk.py`. No module outside runners should require `ANTHROPIC_API_KEY`.
 
 ### Recipes (`src/llm_wiki/recipes/`)
 
