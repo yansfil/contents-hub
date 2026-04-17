@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Single entry-point for common dev tasks. Uses uv to ensure the right env.
+#
+# Usage:
+#   ./dev web               # launch the dashboard on http://localhost:8585
+#   ./dev web --port 9000   # override port
+#   ./dev daemon            # launch the scheduler daemon
+#   ./dev test [pytest-args]
+#   ./dev sync              # resync the venv (after pulling changes)
+#   ./dev                   # show this help
+
+set -euo pipefail
+cd "$(dirname "$0")"
+
+cmd=${1:-help}
+shift || true
+
+case "$cmd" in
+  web)     exec uv run python -m llm_wiki web "$@" ;;
+  daemon)  exec uv run python -m llm_wiki daemon "$@" ;;
+  test)    exec uv run pytest "$@" ;;
+  sync)    exec uv sync --all-extras ;;
+  help|*)
+    sed -n '2,12p' "$0"
+    exit 0
+    ;;
+esac

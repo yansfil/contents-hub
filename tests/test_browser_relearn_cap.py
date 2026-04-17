@@ -85,7 +85,7 @@ def test_successful_execute_resets_relearn_count():
     # Exercise the success tail of _run_execute without the prompt template
     # (which contains literal braces that conflict with str.format in tests).
     async def run_it():
-        async def fake_run_execute(recipe, *, max_items):
+        async def fake_run_execute(recipe, *, since=None, max_items):
             f._config["consecutive_failures"] = 0
             f._config["relearn_count"] = 0
             f._config.pop("needs_error_status", None)
