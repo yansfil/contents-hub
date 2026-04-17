@@ -35,3 +35,7 @@ node_modules/
 .llm-wiki/*.log
 .llm-wiki/scheduled_tasks.lock
 .claude/scheduled_tasks.lock
+
+# Vault content — promoted sources are user data, not code
+sources/
+.gstack/
