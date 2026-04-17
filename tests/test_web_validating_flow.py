@@ -84,13 +84,32 @@ def _seed_validating_sub(
     store.set_status(url, SubscriptionStatus.VALIDATING)
     extras: dict = {"trial_pre_recipe": "", "trial_pre_had_override": False}
     if with_trial_result:
+        samples = (
+            [
+                {
+                    "url": "https://example.com/a",
+                    "title": "Sample A",
+                    "body": "body of a" * 10,
+                    "published_at": "2026-04-10T00:00:00+00:00",
+                },
+                {
+                    "url": "https://example.com/b",
+                    "title": "Sample B",
+                    "body": "body of b",
+                    "published_at": "2026-04-11T00:00:00+00:00",
+                },
+            ]
+            if trial_ok
+            else []
+        )
         extras["trial_result"] = {
             "ok": trial_ok,
-            "items": 3 if trial_ok else 0,
+            "items": len(samples),
             "error": "" if trial_ok else "explore timed out",
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "recipe_mode": "new" if trial_ok else "failed",
             "recipe": "LIST: ...\nCONTENT: ...\n" if trial_ok else "",
+            "samples": samples,
         }
     store.update_config(url, extras)
     sub = store.get(url)
@@ -127,12 +146,14 @@ def test_validating_status_round_trips(vault):
 # ---------------------------------------------------------------------------
 
 
-def test_keep_activates_and_strips_trial_keys(vault, client):
+def test_keep_activates_and_commits_samples(vault, client):
     sub_id = _seed_validating_sub(vault)
 
     resp = client.post(f"/subscriptions/{sub_id}/keep")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "active"
+    body = resp.json()
+    assert body["status"] == "active"
+    assert body["inserted"] == 2  # seeded 2 samples
 
     store = SubscriptionStore(vault)
     sub = store.get_by_id(str(sub_id))
@@ -140,6 +161,49 @@ def test_keep_activates_and_strips_trial_keys(vault, client):
     assert "trial_result" not in sub.config
     assert "trial_pre_recipe" not in sub.config
     assert "trial_pre_had_override" not in sub.config
+
+    # Samples landed in raw_items with body + published_at populated.
+    with sqlite3.connect(vault.meta_path / "state.db") as conn:
+        rows = conn.execute(
+            "SELECT url, title, body, published_at FROM raw_items "
+            "WHERE subscription_id = ? ORDER BY url",
+            (sub_id,),
+        ).fetchall()
+    urls = [r[0] for r in rows]
+    assert urls == ["https://example.com/a", "https://example.com/b"]
+    assert all(len(r[2]) > 0 for r in rows)  # body populated
+    assert all(r[3] is not None for r in rows)  # published_at populated
+
+
+def test_keep_no_samples_still_activates(vault, client):
+    """A successful-but-zero-items trial can still be Kept (becomes an empty
+    active sub that future fetches will populate)."""
+    store = SubscriptionStore(vault)
+    store.add(url="https://example.com/", title="E", source_type="webpage")
+    store.set_status("https://example.com/", SubscriptionStatus.VALIDATING)
+    store.update_config(
+        "https://example.com/",
+        {
+            "trial_pre_recipe": "",
+            "trial_pre_had_override": False,
+            "trial_result": {
+                "ok": True, "items": 0, "error": "",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "recipe_mode": "unchanged", "recipe": "", "samples": [],
+            },
+        },
+    )
+    sub = store.get("https://example.com/")
+
+    resp = client.post(f"/subscriptions/{sub.id}/keep")
+    assert resp.status_code == 200
+    assert resp.json()["inserted"] == 0
+
+    with sqlite3.connect(vault.meta_path / "state.db") as conn:
+        n = conn.execute(
+            "SELECT COUNT(*) FROM raw_items WHERE subscription_id = ?", (int(sub.id),)
+        ).fetchone()[0]
+    assert n == 0
 
 
 def test_keep_is_noop_for_active_sub(vault, client):
@@ -158,9 +222,9 @@ def test_keep_is_noop_for_active_sub(vault, client):
 # ---------------------------------------------------------------------------
 
 
-def test_discard_deletes_sub_and_raw_items(vault, client):
+def test_discard_deletes_sub(vault, client):
+    """Trial never inserts into raw_items, so discard only needs to nuke the sub."""
     sub_id = _seed_validating_sub(vault)
-    _add_raw_item(vault, sub_id)
 
     resp = client.post(f"/subscriptions/{sub_id}/discard")
     assert resp.status_code == 200
@@ -168,11 +232,6 @@ def test_discard_deletes_sub_and_raw_items(vault, client):
 
     store = SubscriptionStore(vault)
     assert store.get_by_id(str(sub_id)) is None
-    with sqlite3.connect(vault.meta_path / "state.db") as conn:
-        n = conn.execute(
-            "SELECT COUNT(*) FROM raw_items WHERE subscription_id = ?", (sub_id,)
-        ).fetchone()[0]
-        assert n == 0
 
 
 def test_discard_is_noop_for_active_sub(vault, client):
@@ -191,34 +250,22 @@ def test_discard_is_noop_for_active_sub(vault, client):
 # ---------------------------------------------------------------------------
 
 
-def test_retry_clears_stale_items_and_reruns_trial(vault, client):
+def test_retry_clears_trial_result_and_reruns(vault, client):
     sub_id = _seed_validating_sub(vault, with_trial_result=True, trial_ok=False)
-    _add_raw_item(vault, sub_id, url="https://example.com/stale")
 
     resp = client.post(f"/subscriptions/{sub_id}/retry_validation")
     assert resp.status_code == 200
     assert resp.json()["status"] == "retrying"
 
-    # After retry, the stub fetcher re-populates trial_result (ok, 0 items)
-    # and the stale raw_item was cleared before the new trial ran.
+    # After retry, the stub fetcher re-populates trial_result (ok, 0 items).
+    # trial_pre_recipe persists so the next success can compute recipe_mode.
     store = SubscriptionStore(vault)
     sub = store.get_by_id(str(sub_id))
     assert sub.status == SubscriptionStatus.VALIDATING
-    # The failed trial_result was replaced with a fresh one.
     tr = sub.config["trial_result"]
     assert tr["ok"] is True
     assert tr["items"] == 0
     assert "trial_pre_recipe" in sub.config
-
-    with sqlite3.connect(vault.meta_path / "state.db") as conn:
-        urls = [
-            r[0]
-            for r in conn.execute(
-                "SELECT url FROM raw_items WHERE subscription_id = ?", (sub_id,)
-            ).fetchall()
-        ]
-        # Stale pre-retry item was cleared; stub returns no new items.
-        assert "https://example.com/stale" not in urls
 
 
 def test_retry_is_noop_for_active_sub(vault, client):
