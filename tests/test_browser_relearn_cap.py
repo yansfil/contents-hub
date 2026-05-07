@@ -1,27 +1,35 @@
-"""Tests for relearn escalation cap (T4-fix)."""
+"""Tests for relearn escalation cap (re-targeted onto ``executor.execute``).
+
+Pre-refactor these covered ``BrowserFetcher`` from ``llm_wiki.fetchers.browser``.
+Post-refactor (T13/R-T7.3), the same RELEARN/EXECUTE state-machine semantics
+live in :mod:`llm_wiki.executor`.  The thresholds (``RELEARN_FAILURE_THRESHOLD``,
+``MAX_RELEARN_ATTEMPTS``) and the bookkeeping fields they manipulate
+(``consecutive_failures``, ``relearn_count``, ``needs_error_status``) are
+unchanged, so the assertion logic is preserved verbatim.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
+from types import SimpleNamespace
 
 import pytest
 
-from llm_wiki.fetchers.browser import (
-    BrowserFetcher,
+from llm_wiki.executor import (
     MAX_RELEARN_ATTEMPTS,
     RELEARN_FAILURE_THRESHOLD,
+    execute,
 )
+from llm_wiki.runners import get_default_runner, set_default_runner
 
 
-@pytest.fixture
-def no_rss():
-    """Bypass Tier 1 RSS discovery."""
-    async def _no_rss(url, timeout=10.0):
-        return None
-
-    with patch("llm_wiki.fetchers.browser._check_rss_feed", _no_rss):
-        yield
+def _make_sub(cfg: dict) -> SimpleNamespace:
+    """Minimal duck-typed Subscription for ``executor.execute``."""
+    return SimpleNamespace(
+        url="https://example.com",
+        source_type="webpage",
+        config=cfg,
+    )
 
 
 def _at_relearn_threshold(extra: dict | None = None) -> dict:
@@ -36,71 +44,78 @@ def _at_relearn_threshold(extra: dict | None = None) -> dict:
     return cfg
 
 
-def test_relearn_increments_count(no_rss):
-    """Each relearn attempt increments relearn_count."""
+class _StubRunner:
+    """AgentRunner stub returning a canned response on every ``run()`` call."""
+
+    def __init__(self, response: str):
+        self._response = response
+        self.calls = 0
+
+    async def run(self, prompt, *, max_turns=30, timeout=600.0):
+        self.calls += 1
+        return self._response
+
+
+@pytest.fixture
+def restore_default_runner():
+    original = get_default_runner()
+    yield
+    set_default_runner(original)
+
+
+def test_relearn_increments_count(restore_default_runner):
+    """Each relearn attempt increments relearn_count even when the agent fails
+    to produce a recipe."""
     cfg = _at_relearn_threshold()
+    sub = _make_sub(cfg)
 
-    async def fake_agent(*args, **kwargs):
-        # Agent returns no recipe → relearn fails, but counter already bumped.
-        return "garbage without headers"
+    # Agent returns no recipe headers → relearn fails, but the counter is
+    # already bumped before the agent call returns.
+    set_default_runner(_StubRunner("garbage without headers"))
 
-    with patch("llm_wiki.fetchers.browser._run_agent", fake_agent):
-        f = BrowserFetcher("https://example.com", config=cfg, source_type="webpage")
-        result = asyncio.run(f.poll())
+    result = asyncio.run(execute(sub))
 
     assert result.ok is False
     assert cfg["relearn_count"] == 1
     assert not cfg.get("needs_error_status")
 
 
-def test_relearn_cap_flips_error_flag(no_rss):
-    """After MAX_RELEARN_ATTEMPTS, subsequent relearn sets needs_error_status."""
+def test_relearn_cap_flips_error_flag(restore_default_runner):
+    """After ``MAX_RELEARN_ATTEMPTS`` the next relearn short-circuits and sets
+    ``needs_error_status``."""
     cfg = _at_relearn_threshold({"relearn_count": MAX_RELEARN_ATTEMPTS})
+    sub = _make_sub(cfg)
 
-    async def fake_agent(*args, **kwargs):
-        pytest.fail("agent should not run once cap is reached")
+    runner = _StubRunner("agent should not run once cap is reached")
+    set_default_runner(runner)
 
-    with patch("llm_wiki.fetchers.browser._run_agent", fake_agent):
-        f = BrowserFetcher("https://example.com", config=cfg, source_type="webpage")
-        result = asyncio.run(f.poll())
+    result = asyncio.run(execute(sub))
 
+    assert runner.calls == 0, "runner.run() must not be invoked once cap is reached"
     assert result.ok is False
     assert result.error == "relearn limit exceeded"
     assert cfg["needs_error_status"] is True
     assert cfg["relearn_count"] == MAX_RELEARN_ATTEMPTS
 
 
-def test_successful_execute_resets_relearn_count():
-    """A successful poll resets relearn_count and clears error flag."""
-    from llm_wiki.fetchers.base import FetchResult
-
+def test_successful_execute_resets_relearn_count(restore_default_runner):
+    """A successful EXECUTE-mode poll clears ``relearn_count`` and removes the
+    ``needs_error_status`` flag."""
     cfg = {
         "consecutive_failures": 0,
         "relearn_count": 2,
         "needs_error_status": True,
+        "recipe": "## LIST_STRATEGY\nx\n## CONTENT_STRATEGY\ny\n## METADATA\nz",
     }
+    sub = _make_sub(cfg)
 
-    f = BrowserFetcher("https://example.com", config=cfg, source_type="webpage")
+    # Successful response: items[] is non-empty, no errors.
+    set_default_runner(
+        _StubRunner('{"items": [{"url": "https://example.com/a", "title": "A"}], "errors": []}')
+    )
 
-    # Exercise the success tail of _run_execute without the prompt template
-    # (which contains literal braces that conflict with str.format in tests).
-    async def run_it():
-        async def fake_run_execute(recipe, *, since=None, max_items):
-            f._config["consecutive_failures"] = 0
-            f._config["relearn_count"] = 0
-            f._config.pop("needs_error_status", None)
-            return FetchResult(ok=True, items=[], source_url=f._url)
+    result = asyncio.run(execute(sub))
 
-        f._run_execute = fake_run_execute  # type: ignore[method-assign]
-        from unittest.mock import patch as _patch
-        async def no_rss(url, timeout=10.0):
-            return None
-        with _patch("llm_wiki.fetchers.browser._check_rss_feed", no_rss):
-            # Seed a recipe so _poll_browser takes the EXECUTE branch.
-            cfg["recipe"] = "## LIST_STRATEGY\nx\n## CONTENT_STRATEGY\ny\n## METADATA\nz"
-            return await f.poll()
-
-    result = asyncio.run(run_it())
     assert result.ok is True
     assert cfg["relearn_count"] == 0
     assert "needs_error_status" not in cfg

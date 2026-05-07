@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,12 @@ from llm_wiki.runners import (
     ClaudeSDKRunner,
     get_default_runner,
     set_default_runner,
+)
+from llm_wiki.tools import (
+    ToolRegistry,
+    ToolSpec,
+    get_default_registry,
+    set_default_registry,
 )
 
 
@@ -47,9 +54,15 @@ def test_set_default_runner_swaps_instance():
         set_default_runner(original)
 
 
-async def test_runner_browser_fetcher_uses_default_runner(monkeypatch):
-    """BrowserFetcher._run_agent() should delegate to get_default_runner()."""
-    from llm_wiki.fetchers.browser import _run_agent
+async def test_runner_executor_uses_default_runner():
+    """``executor.execute`` should delegate every agent call to
+    ``get_default_runner()`` (R-T14.1 / INV-1).
+
+    Pre-refactor this test reached into ``llm_wiki.fetchers.browser._run_agent``
+    directly.  Post-refactor (T13/R-T7.3) the executor is the single
+    runner-call-site, so we exercise it through ``execute()``.
+    """
+    from llm_wiki.executor import execute
 
     captured: dict = {}
 
@@ -58,13 +71,88 @@ async def test_runner_browser_fetcher_uses_default_runner(monkeypatch):
             captured["prompt"] = prompt
             captured["max_turns"] = max_turns
             captured["timeout"] = timeout
+            # Return a recipe-shaped response so EXPLORE → EXECUTE fall-through
+            # isn't required; the executor will record this as a failed
+            # explore (no recipe headers) but the runner WAS called, which is
+            # all we're verifying here.
             return "OK"
 
     original = get_default_runner()
     try:
         set_default_runner(FakeRunner())  # type: ignore[arg-type]
-        result = await _run_agent("hello", max_turns=5, timeout=1.0)
-        assert result == "OK"
-        assert captured == {"prompt": "hello", "max_turns": 5, "timeout": 1.0}
+        # No recipe → EXPLORE mode → exactly one runner.run() call.
+        sub = SimpleNamespace(
+            url="https://example.com",
+            source_type="webpage",
+            config={},
+        )
+        await execute(sub)
+        assert captured["max_turns"] == 30
+        assert captured["timeout"] == 600.0
+        assert "https://example.com" in captured["prompt"]
     finally:
         set_default_runner(original)
+
+
+# ---------------------------------------------------------------------------
+# Tool registry injection (T6 / R-T2.1 / R-T13.1)
+# ---------------------------------------------------------------------------
+
+
+def test_default_tool_registry_has_eight_builtin_tools():
+    """The default registry is pre-populated with the eight builtin tool names
+    enumerated in contracts.md → "ToolRegistry"."""
+    registry = get_default_registry()
+    names = set(registry.list())
+    expected = {
+        "fetch_url",
+        "parse_rss",
+        "parse_html",
+        "parse_json",
+        "chromux_navigate",
+        "chromux_extract",
+        "extract_metadata",
+        "persist_raw",
+    }
+    # Default registry must AT LEAST cover the eight contractual names.
+    assert expected.issubset(names), f"missing builtin tools: {expected - names}"
+
+
+def test_set_default_registry_swaps_singleton():
+    """``set_default_registry`` swaps the process-wide default the way
+    ``set_default_runner`` does — used by tests to inject a clean registry
+    instead of relying on a ``tools=`` kwarg pass-through (per learnings
+    from earlier rounds: tests should use ``set_default_registry`` not the
+    kwarg)."""
+    original = get_default_registry()
+    try:
+        custom = ToolRegistry()
+        custom.register(
+            ToolSpec(
+                name="fake_tool",
+                description="test-only tool",
+                input_schema={"type": "object", "properties": {}},
+                handler=_noop_handler,
+            )
+        )
+        set_default_registry(custom)
+        assert get_default_registry() is custom
+        assert "fake_tool" in custom.list()
+    finally:
+        set_default_registry(original)
+
+
+def test_claude_sdk_runner_accepts_tool_registry_kwarg():
+    """``ClaudeSDKRunner.__init__`` accepts a keyword-only ``tool_registry``
+    parameter (R-T13.1).  We don't run the SDK here — only verify the
+    constructor surface."""
+    custom = ToolRegistry()
+    runner = ClaudeSDKRunner(tool_registry=custom)
+    # The runner must hold onto the custom registry, not the default
+    # singleton.  The exact attribute name is implementation-detail; we
+    # just assert it didn't raise on construction and is the correct type.
+    assert isinstance(runner, ClaudeSDKRunner)
+
+
+async def _noop_handler(**_kwargs) -> str:  # pragma: no cover - never invoked
+    return "{}"

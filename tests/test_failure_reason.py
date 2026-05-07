@@ -1,22 +1,29 @@
-"""Tests for the typed FetchFailureReason plumbing.
+"""Tests for the typed FetchFailureReason plumbing (re-targeted to executor).
 
 Covers:
 - Enum parsing from agent JSON (explicit failure_reason).
 - Heuristic fallback when the agent omits the field.
-- BrowserFetcher._record_failure propagating the enum onto FetchResult.
+- Executor-level ``_record_failure`` propagating the enum onto FetchResult.
 - Web layer: needs_auth is decided by the enum, not substring matching.
+
+Pre-refactor these tests imported ``BrowserFetcher`` and the helpers from
+``llm_wiki.fetchers.browser``.  Post-refactor (T13/R-T7.3) the equivalent
+parsing helpers and failure-recording logic live in :mod:`llm_wiki.executor`,
+and the canonical ``FetchFailureReason`` enum lives in :mod:`llm_wiki.models`.
 """
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from llm_wiki.fetchers.browser import (
-    BrowserFetcher,
+from llm_wiki.executor import (
     _parse_failure_json,
     _parse_items_json,
+    _record_failure,
 )
-from llm_wiki.fetchers.failure import FetchFailureReason, infer_from_error
+from llm_wiki.models import FetchFailureReason, infer_from_error
 
 
 class TestEnumParsing:
@@ -76,20 +83,15 @@ class TestParseItemsJson:
 
 
 class TestRecordFailurePropagation:
-    """BrowserFetcher._record_failure should emit the enum value on
-    FetchResult.failure_reason — either the explicit one, or an inferred
-    fallback."""
-
-    def _fetcher(self) -> BrowserFetcher:
-        return BrowserFetcher(
-            "https://example.com",
-            config={},
-            source_type="webpage",
-        )
+    """``executor._record_failure`` should emit the enum value on
+    ``FetchResult.failure_reason`` — either the explicit one, or an inferred
+    fallback based on the error string."""
 
     def test_explicit_reason_wins(self):
-        f = self._fetcher()
-        res = f._record_failure(
+        cfg: dict = {}
+        res = _record_failure(
+            "https://example.com",
+            cfg,
             "agent bounced",
             failure_reason=FetchFailureReason.LOGIN_REQUIRED,
         )
@@ -97,13 +99,21 @@ class TestRecordFailurePropagation:
         assert res.failure_reason == "login_required"
 
     def test_heuristic_fallback_from_text(self):
-        f = self._fetcher()
-        res = f._record_failure("execute agent timed out")
+        cfg: dict = {}
+        res = _record_failure(
+            "https://example.com",
+            cfg,
+            "execute agent timed out",
+        )
         assert res.failure_reason == "timeout"
 
     def test_unknown_bucket_for_opaque_error(self):
-        f = self._fetcher()
-        res = f._record_failure("something weird happened")
+        cfg: dict = {}
+        res = _record_failure(
+            "https://example.com",
+            cfg,
+            "something weird happened",
+        )
         assert res.failure_reason == "unknown"
 
 

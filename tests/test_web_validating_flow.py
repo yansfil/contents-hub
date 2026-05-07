@@ -30,24 +30,26 @@ from llm_wiki.web.app import create_app
 
 
 @dataclass
-class _StubPollResult:
+class _StubFetchResult:
+    """Mimics the subset of ``llm_wiki.models.FetchResult`` that the web
+    layer's ``_run_trial_fetch`` reads."""
+
     ok: bool = True
     items: list = field(default_factory=list)
     error: str = ""
 
 
-class _StubFetcher:
-    """No-op BrowserFetcher: keeps the background task from hitting the agent
-    so tests can assert the endpoint's synchronous effects in isolation."""
+async def _stub_executor_execute(*args, **kwargs):
+    """No-op ``executor.execute``: the trial-fetch background task must not
+    hit the real agent during these endpoint tests.
 
-    def __init__(self, *args, **kwargs):
-        self._updated: dict = {}
-
-    async def poll(self, *args, **kwargs):
-        return _StubPollResult()
-
-    def get_updated_config(self):
-        return self._updated
+    Post-refactor (T13/R-T7.3) the web app's ``_run_trial_fetch`` calls
+    :func:`llm_wiki.executor.execute` directly (its local binding is
+    imported inside the function body), so the correct stub site is
+    ``llm_wiki.executor.execute`` rather than the legacy
+    ``llm_wiki.fetchers.browser.BrowserFetcher``.
+    """
+    return _StubFetchResult()
 
 
 @pytest.fixture
@@ -59,10 +61,11 @@ def vault(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def _stub_browser_fetcher(monkeypatch):
-    """Globally stub out BrowserFetcher so any background fetch in tests is a no-op."""
+def _stub_executor(monkeypatch):
+    """Globally stub :func:`llm_wiki.executor.execute` so any background
+    trial fetch is a no-op."""
     monkeypatch.setattr(
-        "llm_wiki.fetchers.browser.BrowserFetcher", _StubFetcher, raising=True
+        "llm_wiki.executor.execute", _stub_executor_execute, raising=True
     )
 
 
