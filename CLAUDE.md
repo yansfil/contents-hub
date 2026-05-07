@@ -118,5 +118,5 @@ The "fetch now" and "relearn" buttons both go through the same `BrowserFetcher` 
 - **Recipe drift is OK.** EXPLORE/RELEARN overwriting a seed is intentional — the seed is a starting point, not a contract. If a seed update looks better than the stored override, the user resets via the web UI (`/subscriptions/{id}/relearn`) or by clearing `config.recipe`.
 - **Sources are immutable (future state).** When the promotion pipeline comes back, anything written to `sources/` must not be mutated.
 - **Frontmatter via `llm_wiki.frontmatter`.** No hand-rolled YAML serialization elsewhere.
-- **Flat module layout.** Only `collectors/`, `fetchers/`, `recipes/`, `runners/`, `web/` are allowed subpackages.
+- **Flat module layout.** Only `fetchers/`, `recipes/`, `runners/`, `tools/`, `web/` are allowed subpackages.
 - **Agent-agnostic direction.** New agent logic should go through `AgentRunner`. Phase B is to add a `ClaudeCodeRunner` / `CodexRunner` under `runners/`; the core logic should not know which is active.

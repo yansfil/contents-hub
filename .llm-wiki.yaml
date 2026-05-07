@@ -1,0 +1,4 @@
+schedule:
+  defaults: {}
+  global_interval: 15
+  global_cron: null
