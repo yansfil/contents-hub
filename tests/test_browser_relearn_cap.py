@@ -37,6 +37,7 @@ def _at_relearn_threshold(extra: dict | None = None) -> dict:
         "consecutive_failures": RELEARN_FAILURE_THRESHOLD,
         "rss_url": "",
         "fetch_method": "browser",
+        "allow_relearn": True,
         "recipe": "## LIST_STRATEGY\nx\n## CONTENT_STRATEGY\ny\n## METADATA\nz",
     }
     if extra:

@@ -39,15 +39,13 @@ class _StubFetchResult:
     error: str = ""
 
 
-async def _stub_executor_execute(*args, **kwargs):
-    """No-op ``executor.execute``: the trial-fetch background task must not
+async def _stub_executor_trial(*args, **kwargs):
+    """No-op ``executor.execute_trial``: the trial-fetch background task must not
     hit the real agent during these endpoint tests.
 
     Post-refactor (T13/R-T7.3) the web app's ``_run_trial_fetch`` calls
-    :func:`llm_wiki.executor.execute` directly (its local binding is
-    imported inside the function body), so the correct stub site is
-    ``llm_wiki.executor.execute`` rather than the legacy
-    ``llm_wiki.fetchers.browser.BrowserFetcher``.
+    :func:`llm_wiki.executor.execute_trial` directly (its local binding is
+    imported inside the function body), so this is the correct stub site.
     """
     return _StubFetchResult()
 
@@ -62,10 +60,10 @@ def vault(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _stub_executor(monkeypatch):
-    """Globally stub :func:`llm_wiki.executor.execute` so any background
+    """Globally stub :func:`llm_wiki.executor.execute_trial` so any background
     trial fetch is a no-op."""
     monkeypatch.setattr(
-        "llm_wiki.executor.execute", _stub_executor_execute, raising=True
+        "llm_wiki.executor.execute_trial", _stub_executor_trial, raising=True
     )
 
 
@@ -79,11 +77,12 @@ def _seed_validating_sub(
     cfg,
     *,
     url: str = "https://example.com/",
+    source_type: str = "webpage",
     with_trial_result: bool = True,
     trial_ok: bool = True,
 ) -> int:
     store = SubscriptionStore(cfg)
-    store.add(url=url, title="Example", source_type="webpage")
+    store.add(url=url, title="Example", source_type=source_type)
     store.set_status(url, SubscriptionStatus.VALIDATING)
     extras: dict = {"trial_pre_recipe": "", "trial_pre_had_override": False}
     if with_trial_result:
@@ -269,6 +268,42 @@ def test_retry_clears_trial_result_and_reruns(vault, client):
     assert tr["ok"] is True
     assert tr["items"] == 0
     assert "trial_pre_recipe" in sub.config
+
+
+def test_linkedin_retry_runs_trial_in_headed_mode(vault, client, monkeypatch):
+    from llm_wiki.chromux import is_foreground_fetch_allowed
+
+    sub_id = _seed_validating_sub(
+        vault,
+        url="https://www.linkedin.com/in/example/",
+        source_type="linkedin.profile",
+        with_trial_result=True,
+        trial_ok=False,
+    )
+    launches: list[dict] = []
+
+    def fake_open_chromux(url, *, session=None, confirmed=False):
+        launches.append({"url": url, "session": session, "confirmed": confirmed})
+        return {"status": "opened", "url": url, "previous_state": "headless", "error": None}
+
+    async def assert_foreground_executor(*args, **kwargs):
+        assert is_foreground_fetch_allowed() is True
+        return _StubFetchResult()
+
+    monkeypatch.setattr("llm_wiki.web.app._open_chromux", fake_open_chromux)
+    monkeypatch.setattr("llm_wiki.executor.execute_trial", assert_foreground_executor)
+
+    resp = client.post(f"/subscriptions/{sub_id}/retry_validation")
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "retrying"
+    assert launches == [
+        {
+            "url": "https://www.linkedin.com/in/example",
+            "session": f"trial-{sub_id}",
+            "confirmed": True,
+        }
+    ]
 
 
 def test_retry_is_noop_for_active_sub(vault, client):

@@ -80,10 +80,10 @@ async def test_runner_executor_uses_default_runner():
     original = get_default_runner()
     try:
         set_default_runner(FakeRunner())  # type: ignore[arg-type]
-        # No recipe → EXPLORE mode → exactly one runner.run() call.
+        # Catalog source type → pinned built-in recipe → one runner.run() call.
         sub = SimpleNamespace(
-            url="https://example.com",
-            source_type="webpage",
+            url="https://example.com/feed.xml",
+            source_type="rss.feed",
             config={},
         )
         await execute(sub)
@@ -116,6 +116,16 @@ def test_default_tool_registry_has_eight_builtin_tools():
     }
     # Default registry must AT LEAST cover the eight contractual names.
     assert expected.issubset(names), f"missing builtin tools: {expected - names}"
+
+
+async def test_default_browser_tool_lazy_handlers_are_callable():
+    """Browser lazy handlers must resolve to coroutine handlers, not ToolSpec objects."""
+    registry = get_default_registry()
+    for name in ("chromux_navigate", "chromux_extract"):
+        spec = registry.get(name)
+        assert spec is not None
+        result = await spec.handler()
+        assert "missing or invalid" in result
 
 
 def test_set_default_registry_swaps_singleton():
