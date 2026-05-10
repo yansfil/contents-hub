@@ -10,6 +10,7 @@ from llm_wiki.api import collect_all_due, fetch_subscription
 from llm_wiki.cli import main as cli_main
 from llm_wiki.config import WikiConfig
 from llm_wiki.db import init_db
+from llm_wiki.lenses import evaluate_post_fetch_lenses
 from llm_wiki.models import FetchResult
 from llm_wiki.runners import get_default_runner, set_default_runner
 from llm_wiki.subscriptions import SubscriptionStore
@@ -62,43 +63,52 @@ def _seed_lens(
         conn.commit()
 
 
-def _fetch_runner_for(*, title: str, body: str, url: str = "https://example.com/post-1") -> _SequenceRunner:
+def _fetch_runner_for(
+    *,
+    title: str,
+    body: str,
+    url: str = "https://example.com/post-1",
+    lens_response: str | None = None,
+) -> _SequenceRunner:
     published = datetime(2026, 5, 1, tzinfo=timezone.utc).isoformat()
-    return _SequenceRunner(
-        [
-            json.dumps(
-                {
-                    "items": [
-                        {
-                            "url": url,
-                            "title_hint": title,
-                        }
-                    ],
-                    "errors": [],
-                    "failure_reason": None,
-                }
-            ),
-            json.dumps(
-                {
-                    "items": [
-                        {
-                            "url": url,
-                            "title": title,
-                            "summary": body[:40],
-                            "body_markdown": body,
-                            "published_at": published,
-                            "body_status": "full",
-                        }
-                    ],
-                    "errors": [],
-                    "failure_reason": None,
-                }
-            ),
-        ]
-    )
+    responses = [
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "url": url,
+                        "title_hint": title,
+                    }
+                ],
+                "errors": [],
+                "failure_reason": None,
+            }
+        ),
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "url": url,
+                        "title": title,
+                        "summary": body[:40],
+                        "body_markdown": body,
+                        "published_at": published,
+                        "body_status": "full",
+                    }
+                ],
+                "errors": [],
+                "failure_reason": None,
+            }
+        ),
+    ]
+    if lens_response is not None:
+        responses.append(lens_response)
+    return _SequenceRunner(responses)
 
 
-def test_fetch_subscription_records_enabled_default_lens_matches_for_new_items(tmp_path):
+def test_fetch_subscription_records_enabled_default_lens_matches_for_new_items(
+    tmp_path,
+):
     cfg = _cfg(tmp_path)
     _seed_lens(cfg, "ai", keywords=["artificial intelligence", "machine learning"])
     _seed_lens(cfg, "disabled", keywords=["machine learning"], enabled=False)
@@ -114,6 +124,24 @@ def test_fetch_subscription_records_enabled_default_lens_matches_for_new_items(t
     runner = _fetch_runner_for(
         title="Machine learning systems update",
         body="Practical notes on artificial intelligence evaluation.",
+        lens_response=json.dumps(
+            {
+                "items": [
+                    {
+                        "id": 1,
+                        "summary": "Machine learning evaluation update.",
+                        "bullets": [
+                            "Covers AI evaluation.",
+                            "Relevant to the AI lens.",
+                            "Captures a model-quality concern.",
+                            "Mentions operational measurement.",
+                            "Highlights review workflow.",
+                            "Preserves the final implementation note.",
+                        ],
+                    }
+                ]
+            }
+        ),
     )
 
     original = get_default_runner()
@@ -124,22 +152,38 @@ def test_fetch_subscription_records_enabled_default_lens_matches_for_new_items(t
         set_default_runner(original)
 
     assert result.ok is True
-    assert len(runner.prompts) == 2
+    assert len(runner.prompts) == 3
     with sqlite3.connect(cfg.meta_path / "state.db") as conn:
         raw_rows = conn.execute(
             "SELECT id, status FROM raw_items WHERE subscription_id = ?",
             (int(sub.id),),
         ).fetchall()
         lens_rows = conn.execute(
-            "SELECT raw_item_id, lens_id FROM raw_item_lenses ORDER BY lens_id",
+            "SELECT raw_item_id, lens_id, summary, bullets_json "
+            "FROM raw_item_lenses ORDER BY lens_id",
         ).fetchall()
 
     assert len(raw_rows) == 1
     assert raw_rows[0][1] == "raw"
-    assert lens_rows == [(raw_rows[0][0], "ai")]
+    assert lens_rows == [
+        (
+            raw_rows[0][0],
+            "ai",
+            "Machine learning evaluation update.",
+            (
+                '["Covers AI evaluation.", "Relevant to the AI lens.", '
+                '"Captures a model-quality concern.", '
+                '"Mentions operational measurement.", '
+                '"Highlights review workflow.", '
+                '"Preserves the final implementation note."]'
+            ),
+        )
+    ]
 
 
-def test_collect_all_due_records_lenses_for_new_items_without_changing_tick_counts(tmp_path):
+def test_collect_all_due_records_lenses_for_new_items_without_changing_tick_counts(
+    tmp_path,
+):
     cfg = _cfg(tmp_path)
     _seed_lens(cfg, "ai", keywords=["llm"])
     store = SubscriptionStore(cfg)
@@ -152,6 +196,17 @@ def test_collect_all_due_records_lenses_for_new_items_without_changing_tick_coun
     runner = _fetch_runner_for(
         title="LLM evaluation digest",
         body="A weekly LLM systems note.",
+        lens_response=json.dumps(
+            {
+                "items": [
+                    {
+                        "id": 1,
+                        "summary": "Weekly LLM systems note.",
+                        "bullets": ["LLM-focused update."],
+                    }
+                ]
+            }
+        ),
     )
 
     original = get_default_runner()
@@ -234,7 +289,9 @@ def test_duplicate_fetch_does_not_re_evaluate_existing_raw_item_for_lenses(tmp_p
 
 def test_lens_classifier_failure_does_not_roll_back_raw_fetch_success(tmp_path):
     cfg = _cfg(tmp_path)
-    _seed_lens(cfg, "semantic", name="AI research", description="Items about AI research")
+    _seed_lens(
+        cfg, "semantic", name="AI research", description="Items about AI research"
+    )
     store = SubscriptionStore(cfg)
     sub = store.add(
         url="https://example.com/feed.xml",
@@ -257,6 +314,86 @@ def test_lens_classifier_failure_does_not_roll_back_raw_fetch_success(tmp_path):
     assert result.ok is True
     with sqlite3.connect(cfg.meta_path / "state.db") as conn:
         assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
+
+
+def test_semantic_lens_ignores_classifier_ids_outside_loaded_raw_items(tmp_path):
+    cfg = _cfg(tmp_path)
+    _seed_lens(
+        cfg, "semantic", name="AI research", description="Items about AI research"
+    )
+    store = SubscriptionStore(cfg)
+    sub = store.add(
+        url="https://example.com/feed.xml",
+        title="Example Feed",
+        source_type="rss.feed",
+        lenses=["semantic"],
+    )
+    other_sub = store.add(
+        url="https://other.example.com/feed.xml",
+        title="Other Feed",
+        source_type="rss.feed",
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
+        conn.execute(
+            """INSERT INTO raw_items
+               (url, title, body, subscription_id, collected_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                "https://example.com/post-1",
+                "Correct subscription item",
+                "AI research",
+                int(sub.id),
+                now,
+                now,
+            ),
+        )
+        correct_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            """INSERT INTO raw_items
+               (url, title, body, subscription_id, collected_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                "https://other.example.com/post-1",
+                "Wrong subscription item",
+                "AI research",
+                int(other_sub.id),
+                now,
+                now,
+            ),
+        )
+        wrong_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+
+    runner = _SequenceRunner(
+        [
+            json.dumps(
+                {
+                    "matches": [
+                        {
+                            "id": wrong_id,
+                            "summary": "Wrong subscription summary.",
+                            "bullets": ["Should be ignored."],
+                        }
+                    ]
+                }
+            )
+        ]
+    )
+
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        inserted = asyncio.run(
+            evaluate_post_fetch_lenses(cfg, int(sub.id), [correct_id])
+        )
+    finally:
+        set_default_runner(original)
+
+    assert inserted == 0
+    assert len(runner.prompts) == 1
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
         assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
 
 
