@@ -36,6 +36,10 @@ node_modules/
 .llm-wiki/scheduled_tasks.lock
 .claude/scheduled_tasks.lock
 
-# Vault content — promoted sources are user data, not code
+# Vault content — promoted sources / generated digests are user data, not code
 sources/
+digests/
 .gstack/
+
+# QA evidence artifacts
+.qa-reports/
