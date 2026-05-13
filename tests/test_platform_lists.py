@@ -4,7 +4,9 @@ import asyncio
 import json
 
 from contents_hub.executor import list_items
+from contents_hub.models import FetchFailureReason, ListItem
 from contents_hub.platform_lists import (
+    PlatformListTransientError,
     linkedin_list_items_from_records,
     x_list_items_from_article_records,
 )
@@ -297,6 +299,88 @@ def test_x_direct_list_uses_search_when_profile_has_no_originals(monkeypatch):
         "https://x.com/garrytan",
         "https://x.com/search?q=from%3Agarrytan%20-filter%3Areplies&src=typed_query&f=live",
     ]
+    assert runner.prompts == []
+
+
+def test_x_direct_list_retries_transient_chromux_lock_without_agent(monkeypatch):
+    calls = {"direct": 0}
+
+    async def fake_list_x_profile_items(url: str, *, max_items: int):
+        calls["direct"] += 1
+        if calls["direct"] == 1:
+            raise PlatformListTransientError(
+                "Failed to acquire lock after 30 attempts: /tmp/contents-hub.lock"
+            )
+        return [
+            ListItem(
+                item_key="x:status:333",
+                url="https://x.com/karpathy/status/333",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "contents_hub.executor.list_x_profile_items",
+        fake_list_x_profile_items,
+    )
+    monkeypatch.setattr(
+        "contents_hub.executor._PLATFORM_DIRECT_RETRY_DELAY_SECONDS",
+        0,
+    )
+
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://x.com/karpathy",
+            "source_type": "x.profile",
+            "config": {},
+        },
+    )()
+    runner = _UnexpectedRunner()
+
+    result = asyncio.run(list_items(sub, runner=runner))  # type: ignore[arg-type]
+
+    assert result.ok is True
+    assert calls == {"direct": 2}
+    assert [item.url for item in result.items] == ["https://x.com/karpathy/status/333"]
+    assert runner.prompts == []
+
+
+def test_x_direct_list_transient_chromux_lock_fails_fast_without_agent(monkeypatch):
+    calls = {"direct": 0}
+
+    async def fake_list_x_profile_items(url: str, *, max_items: int):
+        calls["direct"] += 1
+        raise PlatformListTransientError(
+            "Failed to acquire lock after 30 attempts: /tmp/contents-hub.lock"
+        )
+
+    monkeypatch.setattr(
+        "contents_hub.executor.list_x_profile_items",
+        fake_list_x_profile_items,
+    )
+    monkeypatch.setattr(
+        "contents_hub.executor._PLATFORM_DIRECT_RETRY_DELAY_SECONDS",
+        0,
+    )
+
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://x.com/karpathy",
+            "source_type": "x.profile",
+            "config": {},
+        },
+    )()
+    runner = _UnexpectedRunner()
+
+    result = asyncio.run(list_items(sub, runner=runner))  # type: ignore[arg-type]
+
+    assert result.ok is False
+    assert result.failure_reason == FetchFailureReason.TIMEOUT.value
+    assert "Failed to acquire lock" in result.error
+    assert calls == {"direct": 2}
     assert runner.prompts == []
 
 
