@@ -21,9 +21,9 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
-# State (user-specific)
-.contents-hub/state.db*
-.llm-wiki/state.db*
+# Agent/runtime state
+.claude/settings.local.json
+.omx/
 
 # Spec backups
 *.backup-*
@@ -32,16 +32,14 @@ venv/
 node_modules/
 
 # contents-hub runtime state (keep bundled plugins under .contents-hub/plugins/)
-.contents-hub/state.db*
-.contents-hub/*.db
-.contents-hub/*.log
-.contents-hub/scheduled_tasks.lock
+.contents-hub/*
+!.contents-hub/plugins/
+!.contents-hub/plugins/**
+.contents-hub/plugins/**/__pycache__/
+.contents-hub/plugins/**/*.py[cod]
 
-# legacy llm-wiki runtime state (compatibility fallback)
-.llm-wiki/state.db*
-.llm-wiki/*.db
-.llm-wiki/*.log
-.llm-wiki/scheduled_tasks.lock
+# legacy llm-wiki runtime state (compatibility fallback only; do not track)
+.llm-wiki/
 .claude/scheduled_tasks.lock
 
 # Vault content — promoted sources / generated digests are user data, not code
