@@ -2,23 +2,27 @@ from __future__ import annotations
 
 import subprocess
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from llm_wiki.api import collect_all_due, fetch_subscription
-from llm_wiki.chromux import (
-    PROFILE_IN_FOREGROUND_REASON,
+from contents_hub.api import collect_all_due, fetch_subscription
+from contents_hub.chromux import (
     chromux_foreground_fetch,
     chromux_profile_state,
     open_chromux_headed,
+    resolve_chromux_profile,
 )
-from llm_wiki.config import WikiConfig
-from llm_wiki.db import init_db
-from llm_wiki.models import ListFetchResult
-from llm_wiki.subscriptions import SubscriptionStore
-from llm_wiki.web.app import create_app
+from contents_hub.config import WikiConfig
+from contents_hub.db import init_db
+from contents_hub.models import ListFetchResult
+from contents_hub.subscriptions import SubscriptionStore
+from contents_hub.web.app import create_app
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -41,18 +45,71 @@ def test_chromux_profile_state_detects_modes(monkeypatch):
         def json(self):
             return {"User-Agent": self.user_agent}
 
-    monkeypatch.setattr("llm_wiki.chromux.subprocess.run", fake_run)
+    monkeypatch.setattr("contents_hub.chromux.subprocess.run", fake_run)
     monkeypatch.setattr(
-        "llm_wiki.chromux.httpx.get",
+        "contents_hub.chromux.httpx.get",
         lambda url, timeout: FakeResponse("Mozilla HeadlessChrome/120"),
     )
     assert chromux_profile_state("llm-wiki") == "headless"
 
     monkeypatch.setattr(
-        "llm_wiki.chromux.httpx.get",
+        "contents_hub.chromux.httpx.get",
         lambda url, timeout: FakeResponse("Mozilla Chrome/120"),
     )
     assert chromux_profile_state("llm-wiki") == "headed"
+
+
+def test_resolve_chromux_profile_prefers_canonical_when_no_legacy_exists(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("CHROMUX_PROFILES_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "contents_hub.chromux.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(stdout=""),
+    )
+
+    assert resolve_chromux_profile() == "contents-hub"
+
+
+def test_resolve_chromux_profile_reuses_existing_legacy_login_profile(
+    tmp_path, monkeypatch
+):
+    legacy_profile = tmp_path / "llm-wiki"
+    legacy_profile.mkdir()
+    monkeypatch.setenv("CHROMUX_PROFILES_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "contents_hub.chromux.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(stdout=""),
+    )
+
+    assert resolve_chromux_profile() == "llm-wiki"
+
+
+def test_resolve_chromux_profile_prefers_running_canonical_over_legacy_dir(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "llm-wiki").mkdir()
+    monkeypatch.setenv("CHROMUX_PROFILES_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "contents_hub.chromux.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="contents-hub 9222\n"),
+    )
+
+    assert resolve_chromux_profile() == "contents-hub"
+
+
+def test_recipe_browser_profile_language_is_canonical_with_legacy_fallback():
+    recipe_files = [
+        *sorted((REPO_ROOT / "src/llm_wiki/recipes/templates").glob("*_prompt.md")),
+        REPO_ROOT / "src/llm_wiki/recipes/seed/linkedin.md",
+        REPO_ROOT / "src/llm_wiki/recipes/seed/twitter.md",
+    ]
+
+    for path in recipe_files:
+        text = path.read_text(encoding="utf-8")
+        assert "contents-hub" in text
+        if "llm-wiki" in text:
+            assert "legacy" in text or "fallback" in text
 
 
 def test_open_chromux_headed_requires_confirm_then_kills_and_opens(monkeypatch):
@@ -69,10 +126,10 @@ def test_open_chromux_headed_requires_confirm_then_kills_and_opens(monkeypatch):
         def json(self):
             return {"User-Agent": "Mozilla HeadlessChrome/120"}
 
-    monkeypatch.setattr("llm_wiki.chromux.subprocess.run", fake_run)
-    monkeypatch.setattr("llm_wiki.chromux.httpx.get", lambda url, timeout: FakeResponse())
+    monkeypatch.setattr("contents_hub.chromux.subprocess.run", fake_run)
+    monkeypatch.setattr("contents_hub.chromux.httpx.get", lambda url, timeout: FakeResponse())
     monkeypatch.setattr(
-        "llm_wiki.chromux.subprocess.Popen",
+        "contents_hub.chromux.subprocess.Popen",
         lambda args, **kwargs: popen_calls.append(args),
     )
 
@@ -103,10 +160,10 @@ def test_open_chromux_headed_reopens_blank_tab_when_already_headed(monkeypatch):
         def json(self):
             return {"User-Agent": "Mozilla Chrome/120"}
 
-    monkeypatch.setattr("llm_wiki.chromux.subprocess.run", fake_run)
-    monkeypatch.setattr("llm_wiki.chromux.httpx.get", lambda url, timeout: FakeResponse())
+    monkeypatch.setattr("contents_hub.chromux.subprocess.run", fake_run)
+    monkeypatch.setattr("contents_hub.chromux.httpx.get", lambda url, timeout: FakeResponse())
     monkeypatch.setattr(
-        "llm_wiki.chromux.subprocess.Popen",
+        "contents_hub.chromux.subprocess.Popen",
         lambda args, **kwargs: popen_calls.append(args),
     )
 
@@ -118,7 +175,7 @@ def test_open_chromux_headed_reopens_blank_tab_when_already_headed(monkeypatch):
     ]
 
 
-async def test_collect_due_pauses_chromux_fetch_when_profile_is_headed(
+async def test_collect_due_closes_foreground_profile_and_fetches(
     vault, monkeypatch
 ):
     store = SubscriptionStore(vault)
@@ -129,20 +186,60 @@ async def test_collect_due_pauses_chromux_fetch_when_profile_is_headed(
         config={"fetch_method": "browser"},
     )
 
-    async def fail_execute(*args, **kwargs):
-        raise AssertionError("executor should not run while profile is headed")
+    calls: list[str] = []
 
-    monkeypatch.setattr("llm_wiki.api.is_chromux_profile_in_foreground", lambda: True)
-    monkeypatch.setattr("llm_wiki.api._executor_execute", fail_execute)
-    monkeypatch.setattr("llm_wiki.api._executor_list_items", fail_execute)
+    async def fake_list_items(sub, **kwargs):
+        calls.append(sub.url)
+        return ListFetchResult(ok=True, source_url=sub.url, items=[])
+
+    async def fail_content(*args, **kwargs):
+        raise AssertionError("content executor should not run without new items")
+
+    monkeypatch.setattr(
+        "contents_hub.api.prepare_chromux_for_background_fetch",
+        lambda: {"ok": True, "status": "foreground_killed", "error": None},
+    )
+    monkeypatch.setattr("contents_hub.api._executor_list_items", fake_list_items)
+    monkeypatch.setattr("contents_hub.api._executor_content_items", fail_content)
 
     result = await collect_all_due(vault)
 
     assert result.total == 1
     assert result.errors == 0
-    assert result.skipped == 1
-    assert result.per_subscription[0].error == "paused: profile_in_foreground"
-    assert result.per_subscription[0].failure_reason == PROFILE_IN_FOREGROUND_REASON
+    assert result.skipped == 0
+    assert result.per_subscription[0].ok is True
+    assert calls == ["https://example.com/"]
+
+
+async def test_fetch_subscription_closes_foreground_profile_before_fetch(
+    vault, monkeypatch
+):
+    store = SubscriptionStore(vault)
+    sub = store.add(
+        url="https://example.com/",
+        title="Example",
+        source_type="webpage",
+        config={"fetch_method": "browser"},
+    )
+    calls: list[str] = []
+
+    async def fake_list_items(sub, **kwargs):
+        calls.append(sub.url)
+        return ListFetchResult(ok=True, source_url=sub.url, items=[])
+
+    async def fail_execute(*args, **kwargs):
+        raise AssertionError("content executor should not run without new items")
+
+    monkeypatch.setattr(
+        "contents_hub.api.prepare_chromux_for_background_fetch",
+        lambda: {"ok": True, "status": "foreground_killed", "error": None},
+    )
+    monkeypatch.setattr("contents_hub.api._executor_list_items", fake_list_items)
+    monkeypatch.setattr("contents_hub.api._executor_content_items", fail_execute)
+
+    allowed = await fetch_subscription(vault, sub.url)
+    assert allowed.ok is True
+    assert calls == [sub.url]
 
 
 async def test_fetch_subscription_closes_tracked_chromux_session(vault, monkeypatch):
@@ -156,7 +253,7 @@ async def test_fetch_subscription_closes_tracked_chromux_session(vault, monkeypa
     closed_sessions: list[str] = []
 
     async def fake_list_items(sub, **kwargs):
-        from llm_wiki.tools.browser import chromux_navigate_handler
+        from contents_hub.tools.browser import chromux_navigate_handler
 
         payload = await chromux_navigate_handler(
             url="https://example.com/", session_id="wiki-test"
@@ -166,20 +263,27 @@ async def test_fetch_subscription_closes_tracked_chromux_session(vault, monkeypa
 
     def fake_run_chromux(args, *, env=None, timeout):
         assert args == ["chromux", "open", "wiki-test", "https://example.com/"]
-        assert env["CHROMUX_PROFILE"] == "llm-wiki"
+        assert env["CHROMUX_PROFILE"] == "contents-hub"
         return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
 
     def fake_close(session_id, **kwargs):
         closed_sessions.append(session_id)
         return subprocess.CompletedProcess(["chromux", "close", session_id], 0)
 
-    monkeypatch.setattr("llm_wiki.api.is_chromux_profile_in_foreground", lambda: False)
     monkeypatch.setattr(
-        "llm_wiki.tools.browser.is_chromux_profile_in_foreground", lambda profile: False
+        "contents_hub.api.prepare_chromux_for_background_fetch",
+        lambda: {"ok": True, "status": "ready", "error": None},
     )
-    monkeypatch.setattr("llm_wiki.api._executor_list_items", fake_list_items)
-    monkeypatch.setattr("llm_wiki.tools.browser._run_chromux", fake_run_chromux)
-    monkeypatch.setattr("llm_wiki.chromux.close_chromux_session", fake_close)
+    monkeypatch.setattr(
+        "contents_hub.tools.browser.prepare_chromux_for_background_fetch",
+        lambda: {"ok": True, "status": "ready", "error": None},
+    )
+    monkeypatch.setattr(
+        "contents_hub.tools.browser.resolve_chromux_profile", lambda profile=None: "contents-hub"
+    )
+    monkeypatch.setattr("contents_hub.api._executor_list_items", fake_list_items)
+    monkeypatch.setattr("contents_hub.tools.browser._run_chromux", fake_run_chromux)
+    monkeypatch.setattr("contents_hub.chromux.close_chromux_session", fake_close)
 
     result = await fetch_subscription(vault, sub.url)
 
@@ -188,22 +292,27 @@ async def test_fetch_subscription_closes_tracked_chromux_session(vault, monkeypa
 
 
 async def test_foreground_fetch_context_allows_headed_chromux_navigation(monkeypatch):
+    prepare_calls: list[None] = []
+
     def fake_run_chromux(args, *, env=None, timeout):
         return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
 
-    monkeypatch.setattr(
-        "llm_wiki.tools.browser.is_chromux_profile_in_foreground", lambda profile: True
-    )
-    monkeypatch.setattr("llm_wiki.tools.browser._run_chromux", fake_run_chromux)
+    def fake_prepare():
+        prepare_calls.append(None)
+        return {"ok": True, "status": "foreground_killed", "error": None}
 
-    from llm_wiki.tools.browser import chromux_navigate_handler
+    monkeypatch.setattr("contents_hub.tools.browser.prepare_chromux_for_background_fetch", fake_prepare)
+    monkeypatch.setattr("contents_hub.tools.browser._run_chromux", fake_run_chromux)
 
-    paused = json.loads(
+    from contents_hub.tools.browser import chromux_navigate_handler
+
+    closed = json.loads(
         await chromux_navigate_handler(
             url="https://www.linkedin.com/", session_id="wiki-linkedin"
         )
     )
-    assert paused["reason"] == PROFILE_IN_FOREGROUND_REASON
+    assert closed["ok"] is True
+    assert prepare_calls == [None]
 
     async with chromux_foreground_fetch():
         allowed = json.loads(
@@ -213,6 +322,7 @@ async def test_foreground_fetch_context_allows_headed_chromux_navigation(monkeyp
         )
 
     assert allowed["ok"] is True
+    assert prepare_calls == [None]
 
 
 async def test_chromux_browser_tools_match_current_cli_and_session_alias(monkeypatch):
@@ -220,15 +330,19 @@ async def test_chromux_browser_tools_match_current_cli_and_session_alias(monkeyp
 
     def fake_run_chromux(args, *, env=None, timeout):
         calls.append(args)
-        assert env["CHROMUX_PROFILE"] == "llm-wiki"
+        assert env["CHROMUX_PROFILE"] == "contents-hub"
         return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(
-        "llm_wiki.tools.browser.is_chromux_profile_in_foreground", lambda profile: False
+        "contents_hub.tools.browser.prepare_chromux_for_background_fetch",
+        lambda: {"ok": True, "status": "ready", "error": None},
     )
-    monkeypatch.setattr("llm_wiki.tools.browser._run_chromux", fake_run_chromux)
+    monkeypatch.setattr(
+        "contents_hub.tools.browser.resolve_chromux_profile", lambda profile=None: "contents-hub"
+    )
+    monkeypatch.setattr("contents_hub.tools.browser._run_chromux", fake_run_chromux)
 
-    from llm_wiki.tools.browser import chromux_extract_handler, chromux_navigate_handler
+    from contents_hub.tools.browser import chromux_extract_handler, chromux_navigate_handler
 
     opened = json.loads(
         await chromux_navigate_handler(
@@ -261,12 +375,50 @@ async def test_chromux_browser_tools_match_current_cli_and_session_alias(monkeyp
     ]
 
 
+async def test_chromux_browser_tool_env_reuses_legacy_profile_when_only_legacy_exists(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "llm-wiki").mkdir()
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_run_chromux(args, *, env=None, timeout):
+        calls.append((args, env["CHROMUX_PROFILE"]))
+        return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+    monkeypatch.setenv("CHROMUX_PROFILES_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "contents_hub.chromux.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(stdout=""),
+    )
+    monkeypatch.setattr(
+        "contents_hub.tools.browser.prepare_chromux_for_background_fetch",
+        lambda: {"ok": True, "status": "ready", "error": None},
+    )
+    monkeypatch.setattr("contents_hub.tools.browser._run_chromux", fake_run_chromux)
+
+    from contents_hub.tools.browser import chromux_navigate_handler
+
+    opened = json.loads(
+        await chromux_navigate_handler(
+            url="https://www.linkedin.com/feed/", session="exec-linkedin-legacy"
+        )
+    )
+
+    assert opened["ok"] is True
+    assert calls == [
+        (
+            ["chromux", "open", "exec-linkedin-legacy", "https://www.linkedin.com/feed/"],
+            "llm-wiki",
+        )
+    ]
+
+
 async def test_chromux_extract_supports_structured_attributes(monkeypatch):
     calls: list[list[str]] = []
 
     def fake_run_chromux(args, *, env=None, timeout):
         calls.append(args)
-        assert env["CHROMUX_PROFILE"] == "llm-wiki"
+        assert env["CHROMUX_PROFILE"] == "contents-hub"
         return subprocess.CompletedProcess(
             args,
             0,
@@ -274,9 +426,12 @@ async def test_chromux_extract_supports_structured_attributes(monkeypatch):
             stderr="",
         )
 
-    monkeypatch.setattr("llm_wiki.tools.browser._run_chromux", fake_run_chromux)
+    monkeypatch.setattr("contents_hub.tools.browser._run_chromux", fake_run_chromux)
+    monkeypatch.setattr(
+        "contents_hub.tools.browser.resolve_chromux_profile", lambda profile=None: "contents-hub"
+    )
 
-    from llm_wiki.tools.browser import chromux_extract_handler
+    from contents_hub.tools.browser import chromux_extract_handler
 
     result = json.loads(
         await chromux_extract_handler(
@@ -299,8 +454,8 @@ async def test_chromux_extract_supports_structured_attributes(monkeypatch):
 
 def test_settings_resume_background_kills_foreground_profile(vault, monkeypatch):
     monkeypatch.setattr(
-        "llm_wiki.web.app.kill_chromux_profile",
-        lambda profile: {"status": "killed", "previous_state": "headed", "error": None},
+        "contents_hub.web.app.kill_chromux_profile",
+        lambda profile=None: {"status": "killed", "previous_state": "headed", "error": None},
     )
 
     client = TestClient(create_app(vault))

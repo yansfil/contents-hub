@@ -1,7 +1,7 @@
 """Tests for the Lens Inbox feature.
 
 Covers:
-- Pure helpers in :mod:`llm_wiki.lens_inbox` — bullet parsing, deterministic
+- Pure helpers in :mod:`contents_hub.lens_inbox` — bullet parsing, deterministic
   representative selection, source-note relative path, candidate assembly.
 - ``query_lens_inbox`` default rendering, status / lens / subscription
   filters, list and Lens-grouped view modes, empty state, malformed Lens
@@ -18,9 +18,9 @@ import datetime as _dt
 import pytest
 from fastapi.testclient import TestClient
 
-from llm_wiki.config import WikiConfig
-from llm_wiki.db import get_db, init_db
-from llm_wiki.lens_inbox import (
+from contents_hub.config import WikiConfig
+from contents_hub.db import get_db, init_db
+from contents_hub.lens_inbox import (
     LensMetadata,
     build_candidate,
     parse_bullets_json,
@@ -28,7 +28,7 @@ from llm_wiki.lens_inbox import (
     select_representative,
     source_note_relative_path,
 )
-from llm_wiki.web.app import create_app
+from contents_hub.web.app import create_app
 
 
 # ---------------------------------------------------------------------------

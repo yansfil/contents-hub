@@ -1,8 +1,0 @@
-{
-  "name": "llm-wiki-browser",
-  "version": "0.1.0",
-  "description": "Project-local browser automation agents for llm-wiki recipe execution (chromux-driven). Bundled with the vault so the Claude Agent SDK can spawn it without depending on the user's global plugins.",
-  "author": {
-    "name": "llm-wiki"
-  }
-}

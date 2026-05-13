@@ -1,8 +1,8 @@
 """Tests for relearn escalation cap (re-targeted onto ``executor.execute``).
 
-Pre-refactor these covered ``BrowserFetcher`` from ``llm_wiki.fetchers.browser``.
+Pre-refactor these covered ``BrowserFetcher`` from ``contents_hub.fetchers.browser``.
 Post-refactor (T13/R-T7.3), the same RELEARN/EXECUTE state-machine semantics
-live in :mod:`llm_wiki.executor`.  The thresholds (``RELEARN_FAILURE_THRESHOLD``,
+live in :mod:`contents_hub.executor`.  The thresholds (``RELEARN_FAILURE_THRESHOLD``,
 ``MAX_RELEARN_ATTEMPTS``) and the bookkeeping fields they manipulate
 (``consecutive_failures``, ``relearn_count``, ``needs_error_status``) are
 unchanged, so the assertion logic is preserved verbatim.
@@ -15,12 +15,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from llm_wiki.executor import (
+from contents_hub.executor import (
     MAX_RELEARN_ATTEMPTS,
     RELEARN_FAILURE_THRESHOLD,
     execute,
 )
-from llm_wiki.runners import get_default_runner, set_default_runner
+from contents_hub.runners import get_default_runner, set_default_runner
 
 
 def _make_sub(cfg: dict) -> SimpleNamespace:

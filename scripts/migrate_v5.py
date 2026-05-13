@@ -13,8 +13,8 @@ import json
 import sys
 from pathlib import Path
 
-from llm_wiki.config import load_config
-from llm_wiki.db import get_db
+from contents_hub.config import load_config
+from contents_hub.db import get_db
 
 
 def migrate(config_dir: str = ".") -> tuple[int, int]:

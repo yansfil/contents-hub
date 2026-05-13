@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from datetime import datetime, timezone
 
-from llm_wiki.api import collect_all_due, fetch_subscription
-from llm_wiki.config import WikiConfig
-from llm_wiki.db import init_db
-from llm_wiki.recipes import RecipeRegistry
-from llm_wiki.runners import get_default_runner, set_default_runner
-from llm_wiki.source_router import classify
-from llm_wiki.source_types import SOURCE_TYPES
-from llm_wiki.subscriptions import SubscriptionStore
+from contents_hub.api import collect_all_active, collect_all_due, fetch_subscription
+from contents_hub.cli import main as cli_main
+from contents_hub.config import WikiConfig
+from contents_hub.db import init_db
+from contents_hub.executor import content_items, list_items
+from contents_hub.models import FetchedItem, FetchResult, ListItem
+from contents_hub.recipes import RecipeRegistry
+from contents_hub.runners import get_default_runner, set_default_runner
+from contents_hub.source_router import classify
+from contents_hub.source_types import SOURCE_TYPES
+from contents_hub.subscriptions import SubscriptionStore
 
 
 class _StubRunner:
@@ -75,6 +79,197 @@ def test_every_catalog_source_type_has_a_seed_recipe():
             },
         )()
         assert RecipeRegistry.get_recipe(sub), spec.id
+
+
+def test_x_recipe_requires_login_and_preserves_timeline_order():
+    recipe = RecipeRegistry.get_seed("x.profile.default")
+
+    assert recipe is not None
+    assert "로그인 세션을 요구" in recipe
+    assert "article 이 일부 보여도 최신순 신뢰가 없으므로" in recipe
+    assert "time[datetime]" in recipe
+    assert "published_hint" in recipe
+    assert "리포스트는 포함" in recipe
+    assert "프로필 타임라인 DOM 순서를 유지" in recipe
+    assert "/analytics" in recipe
+
+
+def test_cli_sub_add_auto_detects_and_pins_recipe(tmp_path, capsys):
+    exit_code = cli_main(
+        [
+            "--vault",
+            str(tmp_path),
+            "sub",
+            "add",
+            "https://www.youtube.com/@openai",
+            "--filter-prompt",
+            "AI only",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["subscription_id"] > 0
+    assert payload["source_type"] == "youtube.channel"
+    assert payload["recipe_id"] == "youtube.channel.default"
+    assert payload["fetch_method"] == "feed"
+    assert payload["filter_prompt"] == "AI only"
+
+    cfg = WikiConfig(vault_path=tmp_path)
+    sub = SubscriptionStore(cfg).get("https://www.youtube.com/@openai")
+    assert sub is not None
+    assert sub.status.value == "active"
+    assert sub.config["recipe_id"] == "youtube.channel.default"
+    assert sub.config["filter_prompt"] == "AI only"
+
+
+def test_cli_sub_add_accepts_source_type_override_alias(tmp_path, capsys):
+    exit_code = cli_main(
+        [
+            "--vault",
+            str(tmp_path),
+            "sub",
+            "add",
+            "https://example.com/karpathy",
+            "--type",
+            "x",
+            "--title",
+            "Karpathy X",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["source_type"] == "x.profile"
+    assert payload["recipe_id"] == "x.profile.default"
+    assert payload["fetch_method"] == "browser"
+    assert payload["title"] == "Karpathy X"
+
+
+def test_youtube_list_uses_videos_page_fallback_without_agent(monkeypatch):
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://www.youtube.com/@Example",
+            "source_type": "youtube.channel",
+            "config": {},
+        },
+    )()
+
+    async def fake_fetch(url: str) -> dict:
+        if url == "https://www.youtube.com/@Example":
+            return {"ok": True, "body": '"browseId":"UCexample0000000000000000"'}
+        if url.startswith("https://www.youtube.com/feeds/videos.xml"):
+            return {"ok": False, "status": 404, "body": ""}
+        if url == "https://www.youtube.com/@Example/videos":
+            return {
+                "ok": True,
+                "body": (
+                    '"videoId":"EWvNQjAaOHw"'
+                    '"videoId":"EWvNQjAaOHw"'
+                    '"videoId":"7xTGNNLPyMI"'
+                ),
+            }
+        raise AssertionError(f"unexpected fetch {url}")
+
+    runner = _StubRunner("{}")
+    monkeypatch.setattr("contents_hub.executor._fetch_json_url", fake_fetch)
+
+    result = asyncio.run(list_items(sub, runner=runner))  # type: ignore[arg-type]
+
+    assert result.ok is True
+    assert [item.url for item in result.items] == [
+        "https://www.youtube.com/watch?v=EWvNQjAaOHw",
+        "https://www.youtube.com/watch?v=7xTGNNLPyMI",
+    ]
+    assert runner.prompts == []
+
+
+def test_youtube_content_uses_page_metadata_without_agent(monkeypatch):
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://www.youtube.com/@Example",
+            "source_type": "youtube.channel",
+            "config": {},
+        },
+    )()
+
+    async def fake_fetch(url: str) -> dict:
+        assert url == "https://www.youtube.com/watch?v=EWvNQjAaOHw"
+        return {
+            "ok": True,
+            "body": (
+                '<meta property="og:title" content="Demo Video - YouTube">'
+                '<meta property="og:description" content="Demo summary">'
+                '"ownerChannelName":"Example Channel"'
+                '"publishDate":"2026-05-13"'
+            ),
+        }
+
+    runner = _StubRunner("{}")
+    monkeypatch.setattr("contents_hub.executor._fetch_json_url", fake_fetch)
+
+    result = asyncio.run(
+        content_items(
+            sub,
+            [
+                ListItem(
+                    item_key="yt:video:EWvNQjAaOHw",
+                    url="https://www.youtube.com/watch?v=EWvNQjAaOHw",
+                )
+            ],
+            runner=runner,
+        )
+    )
+
+    assert result.ok is True
+    assert result.items[0].title == "Demo Video"
+    assert result.items[0].summary == "Demo summary"
+    assert result.items[0].author == "Example Channel"
+    assert result.items[0].published_at is not None
+    assert result.items[0].extra["body_status"] == "metadata_only"
+    assert runner.prompts == []
+
+
+def test_x_content_uses_list_snapshot_without_agent():
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://x.com/garrytan",
+            "source_type": "x.profile",
+            "config": {},
+        },
+    )()
+    runner = _StubRunner("{}")
+
+    result = asyncio.run(
+        content_items(
+            sub,
+            [
+                ListItem(
+                    item_key="x:status:1",
+                    url="https://x.com/garrytan/status/1",
+                    title_hint="Garry Tan posted",
+                    published_hint="2026-05-13T01:00:00Z",
+                    card_text="Garry Tan\n@garrytan\nNew post body",
+                    source_payload={"status_author": "garrytan"},
+                )
+            ],
+            runner=runner,
+        )
+    )
+
+    assert result.ok is True
+    assert result.items[0].title == "Garry Tan posted"
+    assert result.items[0].content_html == "Garry Tan\n@garrytan\nNew post body"
+    assert result.items[0].author == "garrytan"
+    assert result.items[0].extra["body_status"] == "list_card_snapshot"
+    assert runner.prompts == []
 
 
 def test_fetch_subscription_persists_items_with_catalog_recipe(tmp_path):
@@ -240,7 +435,217 @@ def test_collect_all_due_diffs_before_content_fetch(tmp_path):
     assert result.skipped == 1
     assert result.errors == 0
     assert len(runner.prompts) == 1
-    assert "LIST_STRATEGY 만" in runner.prompts[0]
+
+
+def test_collect_all_active_ignores_due_schedule_and_dedupes(tmp_path):
+    cfg = WikiConfig(vault_path=tmp_path)
+    init_db(cfg)
+    store = SubscriptionStore(cfg)
+    sub = store.add(
+        url="https://example.com/feed.xml",
+        title="Example Feed",
+        source_type="rss.feed",
+    )
+    existing_url = "https://example.com/post-1"
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
+        conn.execute(
+            "UPDATE subscriptions SET last_fetched_at = ?, schedule_interval_minutes = ? WHERE id = ?",
+            (now_iso, 1440, int(sub.id)),
+        )
+        conn.execute(
+            "INSERT INTO raw_items (url, title, body, subscription_id, "
+            "collected_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                existing_url,
+                "Existing",
+                "body",
+                int(sub.id),
+                now_iso,
+                now_iso,
+            ),
+        )
+        conn.commit()
+
+    runner = _SequenceRunner(
+        [
+            """
+            {
+              "items": [
+                {
+                  "url": "https://example.com/post-1/",
+                  "title_hint": "Existing"
+                }
+              ],
+              "errors": [],
+              "failure_reason": null
+            }
+            """
+        ]
+    )
+
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        due = asyncio.run(collect_all_due(cfg))
+        forced = asyncio.run(collect_all_active(cfg))
+    finally:
+        set_default_runner(original)
+
+    assert due.total == 0
+    assert forced.total == 1
+    assert forced.new == 0
+    assert forced.skipped == 1
+    assert forced.errors == 0
+    assert len(runner.prompts) == 1
+
+
+def test_collect_all_active_can_include_error_for_manual_fetch_all(tmp_path, monkeypatch):
+    cfg = WikiConfig(vault_path=tmp_path)
+    init_db(cfg)
+    store = SubscriptionStore(cfg)
+    active = store.add(
+        url="https://example.com/active.xml",
+        title="Active Feed",
+        source_type="rss.feed",
+    )
+    errored = store.add(
+        url="https://example.com/error.xml",
+        title="Errored Feed",
+        source_type="rss.feed",
+    )
+
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
+        conn.execute(
+            """UPDATE subscriptions
+               SET status = 'error', last_error = 'previous failure',
+                   consecutive_errors = 1
+               WHERE id = ?""",
+            (int(errored.id),),
+        )
+        conn.commit()
+
+    calls: list[str] = []
+
+    async def fake_incremental_execute(*, conn, sub, sub_id_int, max_items):
+        calls.append(sub.url)
+        return FetchResult(ok=True, source_url=sub.url, items=[]), 0
+
+    monkeypatch.setattr(
+        "contents_hub.api._incremental_executor_execute",
+        fake_incremental_execute,
+    )
+
+    default = asyncio.run(collect_all_active(cfg))
+    assert default.total == 1
+    assert calls == [active.url]
+
+    calls.clear()
+    manual = asyncio.run(collect_all_active(cfg, include_error=True))
+    assert manual.total == 2
+    assert manual.errors == 0
+    assert calls == [active.url, errored.url]
+
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
+        row = conn.execute(
+            "SELECT status, last_error, consecutive_errors FROM subscriptions WHERE id = ?",
+            (int(errored.id),),
+        ).fetchone()
+
+    assert row == ("active", "", 0)
+
+
+def test_collect_all_active_timeout_excludes_post_fetch_lenses(tmp_path, monkeypatch):
+    cfg = WikiConfig(vault_path=tmp_path)
+    init_db(cfg)
+    store = SubscriptionStore(cfg)
+    sub = store.add(
+        url="https://example.com/feed.xml",
+        title="Example Feed",
+        source_type="rss.feed",
+    )
+
+    async def fake_incremental_execute(*, conn, sub, sub_id_int, max_items):
+        return (
+            FetchResult(
+                ok=True,
+                source_url=sub.url,
+                items=[
+                    FetchedItem(
+                        url="https://example.com/post-1",
+                        title="Post 1",
+                        content_html="body",
+                    )
+                ],
+            ),
+            0,
+        )
+
+    lens_calls: list[tuple[int, tuple[int, ...]]] = []
+
+    async def slow_lens_evaluation(*, config, subscription_id, inserted_ids):
+        lens_calls.append((subscription_id, inserted_ids))
+        await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(
+        "contents_hub.api._incremental_executor_execute",
+        fake_incremental_execute,
+    )
+    monkeypatch.setattr(
+        "contents_hub.api._evaluate_post_fetch_lenses",
+        slow_lens_evaluation,
+    )
+
+    result = asyncio.run(
+        collect_all_active(cfg, per_subscription_timeout_seconds=0.01)
+    )
+
+    assert result.total == 1
+    assert result.errors == 0
+    assert result.new == 1
+    assert result.per_subscription[0].ok is True
+    assert lens_calls and lens_calls[0][0] == int(sub.id)
+
+
+def test_collect_all_active_times_out_one_subscription_and_continues(tmp_path, monkeypatch):
+    cfg = WikiConfig(vault_path=tmp_path)
+    init_db(cfg)
+    store = SubscriptionStore(cfg)
+    slow = store.add(
+        url="https://example.com/slow.xml",
+        title="Slow Feed",
+        source_type="rss.feed",
+    )
+    fast = store.add(
+        url="https://example.com/fast.xml",
+        title="Fast Feed",
+        source_type="rss.feed",
+    )
+    calls: list[str] = []
+
+    async def fake_incremental_execute(*, conn, sub, sub_id_int, max_items):
+        calls.append(sub.url)
+        if sub.url == slow.url:
+            await asyncio.sleep(0.1)
+        return FetchResult(ok=True, source_url=sub.url, items=[]), 0
+
+    monkeypatch.setattr(
+        "contents_hub.api._incremental_executor_execute",
+        fake_incremental_execute,
+    )
+
+    result = asyncio.run(
+        collect_all_active(cfg, per_subscription_timeout_seconds=0.01)
+    )
+
+    assert result.total == 2
+    assert result.errors == 1
+    assert result.per_subscription[0].url == slow.url
+    assert result.per_subscription[0].failure_reason == "timeout"
+    assert result.per_subscription[1].url == fast.url
+    assert result.per_subscription[1].ok is True
+    assert calls == [slow.url, fast.url]
 
 
 def test_fetch_subscription_content_fetches_only_new_list_items(tmp_path):

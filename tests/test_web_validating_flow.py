@@ -20,18 +20,18 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from llm_wiki.config import WikiConfig
-from llm_wiki.db import init_db
-from llm_wiki.subscriptions import (
+from contents_hub.config import WikiConfig
+from contents_hub.db import init_db
+from contents_hub.subscriptions import (
     SubscriptionStatus,
     SubscriptionStore,
 )
-from llm_wiki.web.app import create_app
+from contents_hub.web.app import create_app
 
 
 @dataclass
 class _StubFetchResult:
-    """Mimics the subset of ``llm_wiki.models.FetchResult`` that the web
+    """Mimics the subset of ``contents_hub.models.FetchResult`` that the web
     layer's ``_run_trial_fetch`` reads."""
 
     ok: bool = True
@@ -44,7 +44,7 @@ async def _stub_executor_trial(*args, **kwargs):
     hit the real agent during these endpoint tests.
 
     Post-refactor (T13/R-T7.3) the web app's ``_run_trial_fetch`` calls
-    :func:`llm_wiki.executor.execute_trial` directly (its local binding is
+    :func:`contents_hub.executor.execute_trial` directly (its local binding is
     imported inside the function body), so this is the correct stub site.
     """
     return _StubFetchResult()
@@ -60,10 +60,10 @@ def vault(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _stub_executor(monkeypatch):
-    """Globally stub :func:`llm_wiki.executor.execute_trial` so any background
+    """Globally stub :func:`contents_hub.executor.execute_trial` so any background
     trial fetch is a no-op."""
     monkeypatch.setattr(
-        "llm_wiki.executor.execute_trial", _stub_executor_trial, raising=True
+        "contents_hub.executor.execute_trial", _stub_executor_trial, raising=True
     )
 
 
@@ -271,7 +271,7 @@ def test_retry_clears_trial_result_and_reruns(vault, client):
 
 
 def test_linkedin_retry_runs_trial_in_headed_mode(vault, client, monkeypatch):
-    from llm_wiki.chromux import is_foreground_fetch_allowed
+    from contents_hub.chromux import is_foreground_fetch_allowed
 
     sub_id = _seed_validating_sub(
         vault,
@@ -290,8 +290,8 @@ def test_linkedin_retry_runs_trial_in_headed_mode(vault, client, monkeypatch):
         assert is_foreground_fetch_allowed() is True
         return _StubFetchResult()
 
-    monkeypatch.setattr("llm_wiki.web.app._open_chromux", fake_open_chromux)
-    monkeypatch.setattr("llm_wiki.executor.execute_trial", assert_foreground_executor)
+    monkeypatch.setattr("contents_hub.web.app._open_chromux", fake_open_chromux)
+    monkeypatch.setattr("contents_hub.executor.execute_trial", assert_foreground_executor)
 
     resp = client.post(f"/subscriptions/{sub_id}/retry_validation")
 

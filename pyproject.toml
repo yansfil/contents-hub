@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "llm-wiki"
+name = "contents-hub"
 version = "0.1.0"
 description = "Personal knowledge management tool — collect, compile, and wiki via LLM"
 requires-python = ">=3.11"
@@ -27,8 +27,12 @@ dev = [
     "respx>=0.22",
 ]
 
+[project.scripts]
+contents-hub = "contents_hub.cli:main"
+llm-wiki = "contents_hub.cli:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/llm_wiki"]
+packages = ["src/contents_hub", "src/llm_wiki"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

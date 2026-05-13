@@ -16,8 +16,8 @@ cmd=${1:-help}
 shift || true
 
 case "$cmd" in
-  web)     exec uv run python -m llm_wiki web "$@" ;;
-  daemon)  exec uv run python -m llm_wiki daemon "$@" ;;
+  web)     exec uv run python -m contents_hub web "$@" ;;
+  daemon)  exec uv run python -m contents_hub daemon "$@" ;;
   test)    exec uv run pytest "$@" ;;
   sync)    exec uv sync --all-extras ;;
   help|*)

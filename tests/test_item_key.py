@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from llm_wiki.config import WikiConfig
-from llm_wiki.db import init_db
-from llm_wiki.item_key import item_key, normalize_url
+from contents_hub.config import WikiConfig
+from contents_hub.db import init_db
+from contents_hub.item_key import item_key, normalize_url
 
 
 # ---------------------------------------------------------------------------

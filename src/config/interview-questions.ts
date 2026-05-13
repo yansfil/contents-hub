@@ -1,5 +1,5 @@
 /**
- * LLM Wiki — Onboarding Interview Questions
+ * contents-hub — Onboarding Interview Questions
  *
  * Static question set used by the `/setup` command to configure a user's
  * knowledge wiki. The interview gathers:
@@ -364,7 +364,7 @@ export const INTERVIEW_QUESTIONS: readonly InterviewQuestion[] = [
       "The root directory of your Obsidian vault where wiki pages will be created.",
     answerType: "path",
     parseHint:
-      "Validate path exists. Store in .llm-wiki.json as vault_path. " +
+      "Validate path exists. Store in .contents-hub.json as vault_path. " +
       "Expand ~ to home directory.",
     example: "~/obsidian/my-knowledge-base",
     required: true,

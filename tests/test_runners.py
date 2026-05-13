@@ -7,13 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from llm_wiki.runners import (
+from contents_hub.runners import (
     AgentRunner,
     ClaudeSDKRunner,
     get_default_runner,
     set_default_runner,
 )
-from llm_wiki.tools import (
+from contents_hub.tools import (
     ToolRegistry,
     ToolSpec,
     get_default_registry,
@@ -58,11 +58,11 @@ async def test_runner_executor_uses_default_runner():
     """``executor.execute`` should delegate every agent call to
     ``get_default_runner()`` (R-T14.1 / INV-1).
 
-    Pre-refactor this test reached into ``llm_wiki.fetchers.browser._run_agent``
+    Pre-refactor this test reached into ``contents_hub.fetchers.browser._run_agent``
     directly.  Post-refactor (T13/R-T7.3) the executor is the single
     runner-call-site, so we exercise it through ``execute()``.
     """
-    from llm_wiki.executor import execute
+    from contents_hub.executor import execute
 
     captured: dict = {}
 
@@ -162,6 +162,72 @@ def test_claude_sdk_runner_accepts_tool_registry_kwarg():
     # singleton.  The exact attribute name is implementation-detail; we
     # just assert it didn't raise on construction and is the correct type.
     assert isinstance(runner, ClaudeSDKRunner)
+
+
+def test_sdk_plugin_path_prefers_canonical_contents_hub_plugin(tmp_path, monkeypatch):
+    from contents_hub.runners.claude_sdk import _resolve_project_plugin_path
+
+    canonical = tmp_path / ".contents-hub" / "plugins" / "contents-hub-browser"
+    legacy = tmp_path / ".llm-wiki" / "plugins" / "llm-wiki-browser"
+    (canonical / ".claude-plugin").mkdir(parents=True)
+    (legacy / ".claude-plugin").mkdir(parents=True)
+    (canonical / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+    (legacy / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONTENTS_HUB_VAULT", raising=False)
+    monkeypatch.delenv("LLM_WIKI_VAULT", raising=False)
+
+    assert _resolve_project_plugin_path() == str(canonical)
+
+
+def test_sdk_plugin_path_falls_back_to_legacy_llm_wiki_plugin(tmp_path, monkeypatch):
+    from contents_hub.runners.claude_sdk import _resolve_project_plugin_path
+
+    legacy = tmp_path / ".llm-wiki" / "plugins" / "llm-wiki-browser"
+    (legacy / ".claude-plugin").mkdir(parents=True)
+    (legacy / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONTENTS_HUB_VAULT", raising=False)
+    monkeypatch.delenv("LLM_WIKI_VAULT", raising=False)
+
+    assert _resolve_project_plugin_path() == str(legacy)
+
+
+def test_default_runner_resolves_rich_builtin_tool_schemas():
+    """Default SDK runs should expose concrete ToolSpec schemas, not placeholders."""
+    from contents_hub.runners.claude_sdk import _ensure_rich_builtin_tool_specs
+
+    original = get_default_registry()
+    try:
+        placeholder = ToolRegistry()
+        placeholder.register(
+            ToolSpec(
+                name="parse_rss",
+                description="placeholder",
+                input_schema={"type": "object", "properties": {}, "additionalProperties": True},
+                handler=_noop_handler,
+            )
+        )
+        set_default_registry(placeholder)
+
+        _ensure_rich_builtin_tool_specs()
+
+        spec = get_default_registry().get("parse_rss")
+        assert spec is not None
+        assert "xml" in spec.input_schema["properties"]
+        assert spec.input_schema["required"] == ["xml"]
+        assert "additionalProperties" not in spec.input_schema
+
+        extract_spec = get_default_registry().get("chromux_extract")
+        assert extract_spec is not None
+        assert "anyOf" not in extract_spec.input_schema
+        assert "allOf" not in extract_spec.input_schema
+        assert "oneOf" not in extract_spec.input_schema
+        assert extract_spec.input_schema["required"] == ["session_id"]
+    finally:
+        set_default_registry(original)
 
 
 async def _noop_handler(**_kwargs) -> str:  # pragma: no cover - never invoked

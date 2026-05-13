@@ -7,9 +7,9 @@ Covers:
 - Web layer: needs_auth is decided by the enum, not substring matching.
 
 Pre-refactor these tests imported ``BrowserFetcher`` and the helpers from
-``llm_wiki.fetchers.browser``.  Post-refactor (T13/R-T7.3) the equivalent
-parsing helpers and failure-recording logic live in :mod:`llm_wiki.executor`,
-and the canonical ``FetchFailureReason`` enum lives in :mod:`llm_wiki.models`.
+``contents_hub.fetchers.browser``.  Post-refactor (T13/R-T7.3) the equivalent
+parsing helpers and failure-recording logic live in :mod:`contents_hub.executor`,
+and the canonical ``FetchFailureReason`` enum lives in :mod:`contents_hub.models`.
 """
 
 from __future__ import annotations
@@ -18,12 +18,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from llm_wiki.executor import (
+from contents_hub.executor import (
     _parse_failure_json,
     _parse_items_json,
     _record_failure,
 )
-from llm_wiki.models import FetchFailureReason, infer_from_error
+from contents_hub.models import FetchFailureReason, infer_from_error
 
 
 class TestEnumParsing:
@@ -126,9 +126,9 @@ class TestWebLayerNeedsAuth:
     def client(self, tmp_path, monkeypatch):
         import sqlite3
         from fastapi.testclient import TestClient
-        from llm_wiki.config import WikiConfig
-        from llm_wiki.db import get_db
-        from llm_wiki.web.app import create_app
+        from contents_hub.config import WikiConfig
+        from contents_hub.db import get_db
+        from contents_hub.web.app import create_app
 
         vault = tmp_path
         (vault / ".llm-wiki").mkdir()

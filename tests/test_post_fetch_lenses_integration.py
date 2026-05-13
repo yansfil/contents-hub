@@ -6,14 +6,14 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from llm_wiki.api import collect_all_due, fetch_subscription
-from llm_wiki.cli import main as cli_main
-from llm_wiki.config import WikiConfig
-from llm_wiki.db import init_db
-from llm_wiki.lenses import evaluate_post_fetch_lenses
-from llm_wiki.models import FetchResult
-from llm_wiki.runners import get_default_runner, set_default_runner
-from llm_wiki.subscriptions import SubscriptionStore
+from contents_hub.api import collect_all_due, fetch_subscription
+from contents_hub.cli import main as cli_main
+from contents_hub.config import WikiConfig
+from contents_hub.db import init_db
+from contents_hub.lenses import evaluate_post_fetch_lenses
+from contents_hub.models import FetchResult
+from contents_hub.runners import get_default_runner, set_default_runner
+from contents_hub.subscriptions import SubscriptionStore
 
 
 class _SequenceRunner:
@@ -409,7 +409,7 @@ def test_fetch_cli_stdout_remains_single_json_object(monkeypatch, tmp_path, caps
     async def _fake_fetch(config, sub_ref, *, max_items=10):
         return FetchResult(ok=True, source_url="https://example.com/feed.xml", items=[])
 
-    monkeypatch.setattr("llm_wiki.cli.fetch_subscription", _fake_fetch)
+    monkeypatch.setattr("contents_hub.cli.fetch_subscription", _fake_fetch)
 
     exit_code = cli_main(["--vault", str(tmp_path), "fetch", str(sub.id)])
     captured = capsys.readouterr()

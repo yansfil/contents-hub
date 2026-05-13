@@ -15,8 +15,8 @@ import httpx
 import pytest
 import respx
 
-from llm_wiki.tools.fetchers import fetch_url
-from llm_wiki.tools.parse import parse_html, parse_json, parse_rss
+from contents_hub.tools.fetchers import fetch_url
+from contents_hub.tools.parse import parse_html, parse_json, parse_rss
 
 
 # ---------------------------------------------------------------------------

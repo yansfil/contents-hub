@@ -22,6 +22,7 @@ venv/
 .ruff_cache/
 
 # State (user-specific)
+.contents-hub/state.db*
 .llm-wiki/state.db*
 
 # Spec backups
@@ -30,8 +31,15 @@ venv/
 # Node (if any)
 node_modules/
 
-# llm-wiki runtime state (keep bundled plugins under .llm-wiki/plugins/)
+# contents-hub runtime state (keep bundled plugins under .contents-hub/plugins/)
+.contents-hub/state.db*
+.contents-hub/*.db
+.contents-hub/*.log
+.contents-hub/scheduled_tasks.lock
+
+# legacy llm-wiki runtime state (compatibility fallback)
 .llm-wiki/state.db*
+.llm-wiki/*.db
 .llm-wiki/*.log
 .llm-wiki/scheduled_tasks.lock
 .claude/scheduled_tasks.lock

@@ -12,10 +12,10 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from llm_wiki.config import WikiConfig
-from llm_wiki.db import init_db
-from llm_wiki.subscriptions import SubscriptionStatus, SubscriptionStore
-from llm_wiki.web.app import create_app
+from contents_hub.config import WikiConfig
+from contents_hub.db import init_db
+from contents_hub.subscriptions import SubscriptionStatus, SubscriptionStore
+from contents_hub.web.app import create_app
 
 
 class _StubFilterRunner:
@@ -49,7 +49,7 @@ def client(vault):
 @pytest.fixture(autouse=True)
 def _reset_default_runner():
     """Our tests mutate the process-wide default runner; restore after each."""
-    from llm_wiki import runners as _runners
+    from contents_hub import runners as _runners
 
     before = _runners._DEFAULT  # type: ignore[attr-defined]
     yield
@@ -107,7 +107,7 @@ def test_keep_runs_filter_and_promotes_matches(vault, client, monkeypatch):
     # Wire a deterministic runner so `apply_filter_and_promote` doesn't call
     # the real LLM. The sub's first sample will become raw_item id 1; we tell
     # the stub to return {matched_ids: [1]}.
-    from llm_wiki.runners import set_default_runner
+    from contents_hub.runners import set_default_runner
 
     set_default_runner(_StubFilterRunner(matched_ids=[1]))
 
@@ -159,7 +159,7 @@ def test_keep_without_filter_prompt_is_still_fine(vault, client, monkeypatch):
 
     # No runner call should happen when filter_prompt is empty; stub anyway
     # with an aggressive matcher to catch accidental invocation.
-    from llm_wiki.runners import set_default_runner
+    from contents_hub.runners import set_default_runner
 
     set_default_runner(_StubFilterRunner(matched_ids=[1]))
 

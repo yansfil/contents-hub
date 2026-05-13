@@ -21,15 +21,15 @@ from pathlib import Path
 
 import pytest
 
-from llm_wiki.cli import main as cli_main
-from llm_wiki.config import WikiConfig
-from llm_wiki.db import get_db, init_db
-from llm_wiki.digest import (
+from contents_hub.cli import main as cli_main
+from contents_hub.config import WikiConfig
+from contents_hub.db import get_db, init_db
+from contents_hub.digest import (
     build_digest,
     dispatch_digest,
     run_digest,
 )
-from llm_wiki.runners import get_default_runner, set_default_runner
+from contents_hub.runners import get_default_runner, set_default_runner
 
 
 # ---------------------------------------------------------------------------
@@ -251,12 +251,12 @@ class TestLensZeroUnmatchedGroup:
         self,
     ):
         """Direct unit test on the grouping helper (R-U5.1)."""
-        from llm_wiki.digest import (
+        from contents_hub.digest import (
             _UNMATCHED_LENS_ID,
             _UNMATCHED_LENS_NAME,
             _group_candidates_by_lens,
         )
-        from llm_wiki.lens_inbox import LensInboxCandidate
+        from contents_hub.lens_inbox import LensInboxCandidate
 
         def _mk(rid: int) -> LensInboxCandidate:
             return LensInboxCandidate(
