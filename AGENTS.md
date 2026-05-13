@@ -6,6 +6,7 @@ This file provides guidance to Codex and other coding agents when working with c
 
 - Global CLI installation, vault initialization, and repo-outside usage are documented in `docs/initialization.md`.
 - When changing CLI bootstrap, editable install behavior, `CONTENTS_HUB_VAULT` / legacy `LLM_WIKI_VAULT`, launchd setup, or first-run instructions, update `docs/initialization.md` in the same change.
+- The agent-facing CLI usage guide (consumed by Claude Code / Codex / Hermes) lives at `skills/contents-hub/SKILL.md` — this is the single source of truth; each runtime is installed as a symlink to it (see `docs/initialization.md` §5). When the CLI surface (`contents-hub --help`, `sub`, `fetch`, `tick`, `daemon`, `digest`) changes, update `skills/contents-hub/SKILL.md` in the same change.
 - Claude Code imports this file through `CLAUDE.md` via `@AGENTS.md`; keep this file as the repo-local source of truth.
 
 ## What this is
