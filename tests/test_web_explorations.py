@@ -404,3 +404,106 @@ def test_exploration_approval_rejects_failed_validation(vault, client):
     assert exploration_row["status"] == "draft"
     assert exploration_row["approved_strategy_version_id"] is None
     assert strategy_count == 0
+
+
+def test_registered_exploration_manual_run_persists_raw_items_and_review_links(
+    vault,
+    client,
+):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Manual run",
+        original_request="Find implementation posts",
+        target_surfaces=["threads.search"],
+    )
+    attempt = store.record_validation_attempt(
+        exploration_id=exploration.id,
+        status="succeeded",
+        strategy_snapshot={
+            "target_surfaces": ["threads.search"],
+            "collection_approach": "Search for implementation posts",
+        },
+        preview_items=[{"url": "https://threads.test/preview"}],
+        finished_at=_now(),
+    )
+    store.approve_strategy(
+        exploration_id=exploration.id,
+        validation_attempt_id=attempt.id,
+    )
+    runner = _SequenceRunner(
+        [
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "url": "https://threads.test/run/1",
+                            "title": "Run item",
+                            "summary": "Persist this manual run item.",
+                            "source_surface": "threads.search",
+                        }
+                    ],
+                    "raw_trace": {"steps": ["open", "extract"]},
+                    "chromux_session_ids": ["manual-run"],
+                    "error": "",
+                }
+            )
+        ]
+    )
+
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        resp = client.post(
+            f"/explorations/{exploration.id}/run",
+            follow_redirects=False,
+        )
+    finally:
+        set_default_runner(original)
+
+    assert resp.status_code == 303
+    assert "Manual+run+succeeded:+1+found,+1+new" in resp.headers["location"]
+    assert "Run this approved feed exploration once" in runner.prompts[0]
+    with get_db(vault) as conn:
+        run = conn.execute(
+            """SELECT status, items_found, items_inserted
+               FROM exploration_runs
+               WHERE exploration_id = ?""",
+            (exploration.id,),
+        ).fetchone()
+        raw_item = conn.execute(
+            "SELECT id, title, url, subscription_id FROM raw_items"
+        ).fetchone()
+        discovery = conn.execute(
+            """SELECT owner_type, owner_run_id, exploration_id
+               FROM raw_item_discoveries"""
+        ).fetchone()
+
+    assert run["status"] == "succeeded"
+    assert run["items_found"] == 1
+    assert run["items_inserted"] == 1
+    assert raw_item["title"] == "Run item"
+    assert raw_item["url"] == "https://threads.test/run/1"
+    assert raw_item["subscription_id"] is None
+    assert discovery["owner_type"] == "exploration_run"
+    assert discovery["exploration_id"] == exploration.id
+
+    detail = client.get(f"/explorations/{exploration.id}")
+    assert detail.status_code == 200
+    assert "Manual runs only in this MVP" in detail.text
+    assert "Run item" in detail.text
+    assert f"/lens-inbox?raw_item_id={raw_item['id']}" in detail.text
+
+
+def test_manual_run_requires_registered_exploration(vault, client):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Draft only",
+        original_request="Find posts",
+    )
+
+    resp = client.post(f"/explorations/{exploration.id}/run")
+
+    assert resp.status_code == 200
+    assert "exploration must be approved before manual run" in resp.text
+    with get_db(vault) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 0
