@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import sqlite3
 from datetime import datetime, timezone
 
@@ -7,9 +9,18 @@ import pytest
 
 from contents_hub.config import WikiConfig
 from contents_hub.db import get_db, init_db
-from contents_hub.explorations import ARTIFACTS_DIRNAME, ExplorationStore
+from contents_hub.explorations import (
+    ARTIFACTS_DIRNAME,
+    ExplorationStore,
+    ExplorationStrategyRunner,
+)
 from contents_hub.lens_inbox import query_lens_inbox
+from contents_hub.lenses import (
+    evaluate_exploration_preview_lenses,
+    evaluate_exploration_run_lenses,
+)
 from contents_hub.models import FetchedItem
+from contents_hub.runners import get_default_runner, set_default_runner
 from contents_hub.tools.storage import persist_raw_sync
 
 
@@ -48,6 +59,43 @@ def test_exploration_schema_is_separate_from_subscriptions(vault):
     assert row["lens_ids"] == '["ai"]'
     assert row["status"] == "draft"
     assert row["approved_strategy_version_id"] is None
+
+
+class _SequenceRunner:
+    def __init__(self, responses: list[str]):
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    async def run(self, prompt, *, max_turns=30, timeout=600.0):
+        self.prompts.append(prompt)
+        if not self.responses:
+            raise AssertionError("runner called more times than expected")
+        return self.responses.pop(0)
+
+
+def _seed_lens(
+    cfg: WikiConfig,
+    lens_id: str,
+    *,
+    keywords: list[str] | None = None,
+    enabled: bool = True,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db(cfg) as conn:
+        conn.execute(
+            """INSERT INTO lenses
+               (id, name, description, keywords, enabled, created_at, updated_at)
+               VALUES (?, ?, '', ?, ?, ?, ?)""",
+            (
+                lens_id,
+                lens_id,
+                json.dumps(keywords or []),
+                1 if enabled else 0,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
 
 
 def test_validation_attempts_keep_history_and_file_backed_trace(vault):
@@ -108,6 +156,75 @@ def test_validation_attempts_keep_history_and_file_backed_trace(vault):
             ).fetchone()[0]
             == 2
         )
+        assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
+
+
+def test_exploration_preview_lens_matches_are_artifact_only(vault):
+    _seed_lens(vault, "ai", keywords=["agent"])
+    _seed_lens(vault, "disabled", keywords=["agent"], enabled=False)
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Agent builders",
+        original_request="Find posts about agent builders",
+        target_surfaces=["threads.search"],
+        lens_ids=["ai", "disabled", "missing"],
+    )
+    runner = _SequenceRunner(
+        [
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": 1,
+                            "summary": "Agent builder launch note.",
+                            "bullets": ["Mentions agent workflows."],
+                        }
+                    ]
+                }
+            )
+        ]
+    )
+
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        matches = asyncio.run(
+            evaluate_exploration_preview_lenses(
+                vault,
+                exploration.id,
+                [
+                    {
+                        "url": "https://threads.test/post/1",
+                        "title": "Agent builder note",
+                        "summary": "A useful agent workflow update.",
+                    }
+                ],
+            )
+        )
+    finally:
+        set_default_runner(original)
+
+    attempt = store.record_validation_attempt(
+        exploration_id=exploration.id,
+        status="succeeded",
+        strategy_snapshot={"query": "agent builders"},
+        preview_items=[{"url": "https://threads.test/post/1"}],
+        preview_lens_matches=matches,
+    )
+
+    assert len(runner.prompts) == 1
+    assert attempt.preview_lens_matches == [
+        {
+            "candidate_index": 0,
+            "url": "https://threads.test/post/1",
+            "title": "Agent builder note",
+            "lens_id": "ai",
+            "summary": "Agent builder launch note.",
+            "bullets": ["Mentions agent workflows."],
+        }
+    ]
+    with get_db(vault) as conn:
         assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
 
@@ -373,6 +490,92 @@ def test_exploration_run_items_store_exploration_origin_without_subscription(vau
         assert attribution["owner_id"] == run.id
 
 
+def test_exploration_run_lenses_write_lens_inbox_metadata_shape(vault):
+    _seed_lens(vault, "ai", keywords=["agent"])
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Agent research",
+        original_request="Find agent research posts",
+        lens_ids=["ai"],
+    )
+    attempt = store.record_validation_attempt(
+        exploration_id=exploration.id,
+        status="succeeded",
+        strategy_snapshot={"query": "agent research"},
+    )
+    strategy = store.approve_strategy(
+        exploration_id=exploration.id,
+        validation_attempt_id=attempt.id,
+    )
+    run = store.record_run(
+        exploration_id=exploration.id,
+        strategy_version_id=strategy.id,
+        status="ok",
+    )
+    result = store.persist_run_items(
+        exploration_id=exploration.id,
+        run_id=run.id,
+        items=[
+            FetchedItem(
+                url="https://research.test/agent",
+                title="Agent research item",
+                summary="Agent systems research summary.",
+                content_html="Agent systems research body.",
+            )
+        ],
+    )
+    runner = _SequenceRunner(
+        [
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": result.raw_item_ids[0],
+                            "summary": "Agent systems research summary.",
+                            "bullets": ["Preserves Lens-specific metadata."],
+                        }
+                    ]
+                }
+            )
+        ]
+    )
+
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        inserted = asyncio.run(
+            evaluate_exploration_run_lenses(
+                vault,
+                exploration.id,
+                result.raw_item_ids,
+            )
+        )
+    finally:
+        set_default_runner(original)
+
+    assert inserted == 1
+    with get_db(vault) as conn:
+        row = conn.execute(
+            """SELECT raw_item_id, lens_id, summary, bullets_json
+               FROM raw_item_lenses"""
+        ).fetchone()
+        assert row["raw_item_id"] == result.raw_item_ids[0]
+        assert row["lens_id"] == "ai"
+        assert row["summary"] == "Agent systems research summary."
+        assert json.loads(row["bullets_json"]) == [
+            "Preserves Lens-specific metadata."
+        ]
+        inbox = query_lens_inbox(conn, sources_dirname="sources", status="raw")
+        assert inbox["candidate_count"] == 1
+        candidate = inbox["candidates"][0]
+        assert candidate.subscription_id is None
+        assert candidate.lenses[0].id == "ai"
+        assert candidate.lenses[0].summary == "Agent systems research summary."
+        assert candidate.lenses[0].bullets == (
+            "Preserves Lens-specific metadata.",
+        )
+
+
 def test_deleting_exploration_preserves_raw_items_and_tombstones_attribution(vault):
     store = ExplorationStore(vault)
     exploration = store.create_draft(
@@ -438,6 +641,164 @@ def test_deleting_exploration_preserves_raw_items_and_tombstones_attribution(vau
         assert tombstone["run_at"]
         assert tombstone["strategy_version"] == strategy.version
         assert "Sensitive full request" not in dict(tombstone).values()
+
+
+class _ExplorationRunnerStub:
+    def __init__(self, *responses: str):
+        self.responses = list(responses)
+        self.calls: list[dict] = []
+
+    async def run(self, prompt: str, *, max_turns: int = 30, timeout: float = 600.0):
+        self.calls.append(
+            {"prompt": prompt, "max_turns": max_turns, "timeout": timeout}
+        )
+        if not self.responses:
+            raise AssertionError("unexpected runner call")
+        response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+
+@pytest.mark.asyncio
+async def test_strategy_runner_compiles_without_subscription_recipe_fields(vault):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Threads AI builders",
+        original_request="Find thoughtful Threads posts from AI founders",
+        target_surfaces=["threads.feed"],
+        lens_ids=["ai"],
+    )
+    runner = _ExplorationRunnerStub(
+        """
+        {
+          "target_surfaces": ["threads.feed", "threads.search"],
+          "collection_approach": "Open the home feed, then run a search.",
+          "candidate_selection": "Keep founder posts with concrete lessons.",
+          "extraction_approach": "Extract permalink, author, text, and date.",
+          "stop_limits": {
+            "max_items": 4,
+            "max_pages": 2,
+            "max_scrolls": 3,
+            "timeout_seconds": 90
+          },
+          "lens_alignment_notes": "Prefer items matching the ai Lens.",
+          "recipe_id": "must-not-persist"
+        }
+        """
+    )
+
+    strategy = await ExplorationStrategyRunner(vault, runner=runner).compile_strategy(
+        exploration
+    )
+    snapshot = strategy.as_dict()
+
+    assert runner.calls
+    assert "recipe_base" in runner.calls[0]["prompt"]
+    assert snapshot["target_surfaces"] == ["threads.feed", "threads.search"]
+    assert snapshot["collection_approach"] == "Open the home feed, then run a search."
+    assert snapshot["candidate_selection"] == "Keep founder posts with concrete lessons."
+    assert snapshot["extraction_approach"] == "Extract permalink, author, text, and date."
+    assert snapshot["stop_limits"]["max_items"] == 4
+    assert snapshot["lens_alignment_notes"] == "Prefer items matching the ai Lens."
+    assert "recipe_id" not in snapshot
+
+
+@pytest.mark.asyncio
+async def test_validate_draft_records_bounded_preview_as_artifact_only(vault):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Threads operators",
+        original_request="Find operator posts about AI workflow design",
+        target_surfaces=["threads.search"],
+        lens_ids=["ops"],
+    )
+    runner = _ExplorationRunnerStub(
+        """
+        {
+          "target_surfaces": ["threads.search"],
+          "collection_approach": "Search Threads for AI workflow design.",
+          "candidate_selection": "Keep concrete operator writeups.",
+          "extraction_approach": "Extract post URL, title, and rationale.",
+          "stop_limits": {
+            "max_items": 2,
+            "max_pages": 1,
+            "max_scrolls": 1,
+            "timeout_seconds": 60
+          },
+          "lens_alignment_notes": "Compare against ops Lens."
+        }
+        """,
+        """
+        {
+          "process_summary": "Searched Threads, sampled two posts, stopped at item cap.",
+          "preview_items": [
+            {"url": "https://threads.test/a", "title": "A"},
+            {"url": "https://threads.test/b", "title": "B"},
+            {"url": "https://threads.test/c", "title": "C"}
+          ],
+          "preview_lens_matches": [
+            {"url": "https://threads.test/a", "lens_id": "ops", "summary": "fits"}
+          ],
+          "raw_trace": {"steps": ["search", "open", "extract"]},
+          "chromux_session_ids": ["explore-1"],
+          "error": ""
+        }
+        """,
+    )
+
+    attempt = await ExplorationStrategyRunner(
+        vault,
+        store=store,
+        runner=runner,
+    ).validate_draft(exploration.id)
+
+    assert len(runner.calls) == 2
+    assert runner.calls[1]["max_turns"] == 4
+    assert runner.calls[1]["timeout"] == 60.0
+    assert attempt.status == "succeeded"
+    assert attempt.strategy_snapshot["target_surfaces"] == ["threads.search"]
+    assert attempt.strategy_snapshot["stop_limits"]["max_items"] == 2
+    assert [item["url"] for item in attempt.preview_items] == [
+        "https://threads.test/a",
+        "https://threads.test/b",
+    ]
+    assert attempt.preview_lens_matches == [
+        {"url": "https://threads.test/a", "lens_id": "ops", "summary": "fits"}
+    ]
+    assert attempt.chromux_session_ids == ["explore-1"]
+    assert attempt.raw_trace_artifact_path is not None
+    assert (vault.meta_path / attempt.raw_trace_artifact_path).exists()
+
+    with get_db(vault) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_validate_draft_failure_does_not_mark_other_explorations_failed(vault):
+    store = ExplorationStore(vault)
+    failing = store.create_draft(
+        display_name="Failing",
+        original_request="Find failing posts",
+    )
+    other = store.create_draft(
+        display_name="Other",
+        original_request="Find unrelated posts",
+        status="registered",
+    )
+    runner = _ExplorationRunnerStub(RuntimeError("agent unavailable"))
+
+    attempt = await ExplorationStrategyRunner(
+        vault,
+        store=store,
+        runner=runner,
+    ).validate_draft(failing.id)
+
+    assert attempt.status == "failed"
+    assert attempt.error == "agent unavailable"
+    assert store.get(failing.id).status == "draft"
+    assert store.get(other.id).status == "registered"
 
 
 def test_subscription_persistence_records_discovery_attribution(vault):

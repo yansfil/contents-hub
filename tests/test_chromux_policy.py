@@ -10,6 +10,10 @@ from fastapi.testclient import TestClient
 
 from contents_hub.api import collect_all_due, fetch_subscription
 from contents_hub.chromux import (
+    AUTH_PROFILE_UNAVAILABLE_REASON,
+    PROFILE_SWITCH_NEEDS_CONFIRM_REASON,
+    ChromuxExplorationSessionError,
+    chromux_exploration_session,
     chromux_foreground_fetch,
     chromux_profile_state,
     open_chromux_headed,
@@ -354,6 +358,119 @@ async def test_foreground_fetch_context_allows_headed_chromux_navigation(monkeyp
 
     assert allowed["ok"] is True
     assert prepare_calls == [None]
+
+
+async def test_exploration_session_requires_confirmation_before_interrupting_headless(
+    monkeypatch,
+):
+    monkeypatch.setattr("contents_hub.chromux.resolve_chromux_profile", lambda profile=None: "contents-hub")
+    monkeypatch.setattr(
+        "contents_hub.chromux.open_chromux_headed",
+        lambda *args, **kwargs: {
+            "status": "needs_confirm",
+            "previous_state": "headless",
+            "error": "background owner may fail",
+        },
+    )
+
+    with pytest.raises(ChromuxExplorationSessionError) as exc_info:
+        async with chromux_exploration_session(
+            "https://threads.net/",
+            session="explore-auth",
+        ):
+            raise AssertionError("confirmation blocker should stop the run")
+
+    result = exc_info.value.to_result()
+    assert result["status"] == "needs_confirm"
+    assert result["profile"] == "contents-hub"
+    assert result["previous_state"] == "headless"
+    assert result["failure_reason"] == PROFILE_SWITCH_NEEDS_CONFIRM_REASON
+    assert "background owner" in result["error"]
+
+
+async def test_exploration_session_reports_profile_start_failure_separately(
+    monkeypatch,
+):
+    monkeypatch.setattr("contents_hub.chromux.resolve_chromux_profile", lambda profile=None: "contents-hub")
+    monkeypatch.setattr(
+        "contents_hub.chromux.open_chromux_headed",
+        lambda *args, **kwargs: {
+            "status": "error",
+            "previous_state": "not_running",
+            "error": "chromux launch failed: missing profile",
+        },
+    )
+
+    with pytest.raises(ChromuxExplorationSessionError) as exc_info:
+        async with chromux_exploration_session(confirmed=True):
+            raise AssertionError("profile error should stop the run")
+
+    result = exc_info.value.to_result()
+    assert result["status"] == "error"
+    assert result["previous_state"] == "not_running"
+    assert result["failure_reason"] == AUTH_PROFILE_UNAVAILABLE_REASON
+    assert "chromux launch failed" in result["error"]
+
+
+async def test_exploration_session_allows_foreground_tools_and_closes_run_sessions(
+    monkeypatch,
+):
+    closed_sessions: list[str] = []
+    prepare_calls: list[None] = []
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_open(url, *, session=None, confirmed=False, profile=None):
+        assert url == "https://threads.net/"
+        assert session == "explore-run"
+        assert confirmed is True
+        assert profile == "contents-hub"
+        return {"status": "opened", "previous_state": "headless", "error": None}
+
+    def fake_prepare():
+        prepare_calls.append(None)
+        return {
+            "ok": False,
+            "status": "profile_in_foreground",
+            "error": "foreground",
+            "failure_reason": "profile_in_foreground",
+        }
+
+    def fake_run_chromux(args, *, env=None, timeout):
+        calls.append((args, env["CHROMUX_PROFILE"]))
+        return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+    def fake_close(session_id, **kwargs):
+        closed_sessions.append(session_id)
+        return subprocess.CompletedProcess(["chromux", "close", session_id], 0)
+
+    monkeypatch.setattr("contents_hub.chromux.resolve_chromux_profile", lambda profile=None: profile or "contents-hub")
+    monkeypatch.setattr("contents_hub.tools.browser.resolve_chromux_profile", lambda profile=None: profile or "contents-hub")
+    monkeypatch.setattr("contents_hub.chromux.open_chromux_headed", fake_open)
+    monkeypatch.setattr("contents_hub.tools.browser.prepare_chromux_for_background_fetch", fake_prepare)
+    monkeypatch.setattr("contents_hub.tools.browser._run_chromux", fake_run_chromux)
+    monkeypatch.setattr("contents_hub.chromux.close_chromux_session", fake_close)
+
+    from contents_hub.tools.browser import chromux_navigate_handler
+
+    async with chromux_exploration_session(
+        "https://threads.net/",
+        session="explore-run",
+        confirmed=True,
+    ) as started:
+        assert started["profile"] == "contents-hub"
+        payload = json.loads(
+            await chromux_navigate_handler(
+                url="https://threads.net/@hoyeon",
+                session_id="explore-feed",
+            )
+        )
+        assert payload["ok"] is True
+
+    assert prepare_calls == []
+    assert calls == [
+        (["chromux", "open", "explore-feed", "https://threads.net/@hoyeon"], "contents-hub")
+    ]
+    assert closed_sessions == ["explore-feed", "explore-run"]
 
 
 async def test_chromux_browser_tools_match_current_cli_and_session_alias(monkeypatch):
