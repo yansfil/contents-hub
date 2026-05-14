@@ -13,6 +13,7 @@ from contents_hub.chromux import (
     chromux_foreground_fetch,
     chromux_profile_state,
     open_chromux_headed,
+    prepare_chromux_for_background_fetch,
     resolve_chromux_profile,
 )
 from contents_hub.config import WikiConfig
@@ -135,6 +136,9 @@ def test_open_chromux_headed_requires_confirm_then_kills_and_opens(monkeypatch):
 
     first = open_chromux_headed("https://example.com", session="login-1")
     assert first["status"] == "needs_confirm"
+    assert "Background browser work" in first["error"]
+    assert "headless mode" in first["error"]
+    assert "Any active fetch" in first["error"]
     assert not any(call[-2:] == ["kill", "llm-wiki"] for call in run_calls)
 
     second = open_chromux_headed(
@@ -175,7 +179,30 @@ def test_open_chromux_headed_reopens_blank_tab_when_already_headed(monkeypatch):
     ]
 
 
-async def test_collect_due_closes_foreground_profile_and_fetches(
+def test_background_fetch_prepare_fails_when_profile_is_foreground(
+    monkeypatch, caplog
+):
+    monkeypatch.setattr(
+        "contents_hub.chromux.resolve_chromux_profile",
+        lambda profile=None: "contents-hub",
+    )
+    monkeypatch.setattr(
+        "contents_hub.chromux.is_chromux_profile_in_foreground",
+        lambda profile=None: True,
+    )
+
+    with caplog.at_level("WARNING", logger="contents_hub.chromux"):
+        result = prepare_chromux_for_background_fetch()
+
+    assert result["ok"] is False
+    assert result["status"] == "profile_in_foreground"
+    assert result["profile"] == "contents-hub"
+    assert "foreground/headed" in result["error"]
+    assert "blocked:" in result["error"]
+    assert "background chromux fetch blocked" in caplog.text
+
+
+async def test_collect_due_fails_when_profile_is_foreground(
     vault, monkeypatch
 ):
     store = SubscriptionStore(vault)
@@ -186,32 +213,31 @@ async def test_collect_due_closes_foreground_profile_and_fetches(
         config={"fetch_method": "browser"},
     )
 
-    calls: list[str] = []
-
     async def fake_list_items(sub, **kwargs):
-        calls.append(sub.url)
-        return ListFetchResult(ok=True, source_url=sub.url, items=[])
-
-    async def fail_content(*args, **kwargs):
-        raise AssertionError("content executor should not run without new items")
+        raise AssertionError("background fetch should not run while foreground owns profile")
 
     monkeypatch.setattr(
         "contents_hub.api.prepare_chromux_for_background_fetch",
-        lambda: {"ok": True, "status": "foreground_killed", "error": None},
+        lambda: {
+            "ok": False,
+            "status": "profile_in_foreground",
+            "profile": "contents-hub",
+            "error": "blocked: chromux profile 'contents-hub' is currently open in foreground/headed mode",
+        },
     )
     monkeypatch.setattr("contents_hub.api._executor_list_items", fake_list_items)
-    monkeypatch.setattr("contents_hub.api._executor_content_items", fail_content)
 
     result = await collect_all_due(vault)
 
     assert result.total == 1
-    assert result.errors == 0
+    assert result.errors == 1
     assert result.skipped == 0
-    assert result.per_subscription[0].ok is True
-    assert calls == ["https://example.com/"]
+    assert result.per_subscription[0].ok is False
+    assert result.per_subscription[0].failure_reason == "blocked"
+    assert "foreground/headed" in result.per_subscription[0].error
 
 
-async def test_fetch_subscription_closes_foreground_profile_before_fetch(
+async def test_fetch_subscription_fails_when_profile_is_foreground(
     vault, monkeypatch
 ):
     store = SubscriptionStore(vault)
@@ -221,25 +247,24 @@ async def test_fetch_subscription_closes_foreground_profile_before_fetch(
         source_type="webpage",
         config={"fetch_method": "browser"},
     )
-    calls: list[str] = []
-
     async def fake_list_items(sub, **kwargs):
-        calls.append(sub.url)
-        return ListFetchResult(ok=True, source_url=sub.url, items=[])
-
-    async def fail_execute(*args, **kwargs):
-        raise AssertionError("content executor should not run without new items")
+        raise AssertionError("background fetch should not run while foreground owns profile")
 
     monkeypatch.setattr(
         "contents_hub.api.prepare_chromux_for_background_fetch",
-        lambda: {"ok": True, "status": "foreground_killed", "error": None},
+        lambda: {
+            "ok": False,
+            "status": "profile_in_foreground",
+            "profile": "contents-hub",
+            "error": "blocked: chromux profile 'contents-hub' is currently open in foreground/headed mode",
+        },
     )
     monkeypatch.setattr("contents_hub.api._executor_list_items", fake_list_items)
-    monkeypatch.setattr("contents_hub.api._executor_content_items", fail_execute)
 
     allowed = await fetch_subscription(vault, sub.url)
-    assert allowed.ok is True
-    assert calls == [sub.url]
+    assert allowed.ok is False
+    assert "foreground/headed" in allowed.error
+    assert allowed.failure_reason == "blocked"
 
 
 async def test_fetch_subscription_closes_tracked_chromux_session(vault, monkeypatch):
@@ -299,7 +324,12 @@ async def test_foreground_fetch_context_allows_headed_chromux_navigation(monkeyp
 
     def fake_prepare():
         prepare_calls.append(None)
-        return {"ok": True, "status": "foreground_killed", "error": None}
+        return {
+            "ok": False,
+            "status": "profile_in_foreground",
+            "error": "foreground",
+            "failure_reason": "profile_in_foreground",
+        }
 
     monkeypatch.setattr("contents_hub.tools.browser.prepare_chromux_for_background_fetch", fake_prepare)
     monkeypatch.setattr("contents_hub.tools.browser._run_chromux", fake_run_chromux)
@@ -311,7 +341,8 @@ async def test_foreground_fetch_context_allows_headed_chromux_navigation(monkeyp
             url="https://www.linkedin.com/", session_id="wiki-linkedin"
         )
     )
-    assert closed["ok"] is True
+    assert closed["ok"] is False
+    assert closed["failure_reason"] == "profile_in_foreground"
     assert prepare_calls == [None]
 
     async with chromux_foreground_fetch():

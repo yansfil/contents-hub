@@ -38,6 +38,9 @@ node_modules/
 .contents-hub/plugins/**/__pycache__/
 .contents-hub/plugins/**/*.py[cod]
 
+# Exploration raw trace artifacts can be large and may live in iCloud-backed vaults
+.contents-hub/exploration-artifacts/
+
 # legacy llm-wiki runtime state (compatibility fallback only; do not track)
 .llm-wiki/
 .claude/scheduled_tasks.lock
