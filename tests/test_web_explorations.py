@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 
 from contents_hub.config import WikiConfig
 from contents_hub.db import get_db, init_db
+from contents_hub.explorations import ExplorationStore
+from contents_hub.runners import get_default_runner, set_default_runner
 from contents_hub.web.app import create_app
 
 
@@ -44,6 +46,18 @@ def _seed_lens(cfg, lens_id: str, *, name: str = "", enabled: bool = True) -> No
                 now,
             ),
         )
+
+
+class _SequenceRunner:
+    def __init__(self, responses: list[str]):
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    async def run(self, prompt, *, max_turns=30, timeout=600.0):
+        self.prompts.append(prompt)
+        if not self.responses:
+            raise AssertionError("runner called more times than expected")
+        return self.responses.pop(0)
 
 
 def test_exploration_creation_page_exposes_request_surfaces_lenses_and_name(
@@ -144,3 +158,163 @@ def test_exploration_draft_requires_natural_language_request(vault, client):
     assert "Exploration request is required" in resp.text
     with get_db(vault) as conn:
         assert conn.execute("SELECT COUNT(*) FROM explorations").fetchone()[0] == 0
+
+
+def test_exploration_detail_shows_validation_review_layers(vault, client):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Agent workflow review",
+        original_request="Find implementation-heavy Threads posts",
+        target_surfaces=["threads.search"],
+        lens_ids=["ai"],
+    )
+    attempt = store.record_validation_attempt(
+        exploration_id=exploration.id,
+        status="succeeded",
+        strategy_snapshot={
+            "target_surfaces": ["threads.search"],
+            "collection_approach": "Search Threads for implementation details",
+        },
+        process_summary="Opened Threads search and kept implementation examples.",
+        raw_trace={
+            "steps": ["open Threads search", "scroll once", "extract candidates"],
+            "skipped": ["general commentary"],
+        },
+        preview_items=[
+            {
+                "url": "https://threads.test/post/1",
+                "title": "Agent workflow teardown",
+                "summary": "Shows concrete implementation details.",
+                "source_surface": "threads.search",
+                "collected_at": "2026-05-14T00:00:00Z",
+            }
+        ],
+        preview_lens_matches=[
+            {
+                "url": "https://threads.test/post/1",
+                "lens_id": "ai",
+                "summary": "Matches implementation lens.",
+            }
+        ],
+        finished_at=_now(),
+    )
+
+    resp = client.get(f"/explorations/{exploration.id}")
+
+    assert resp.status_code == 200
+    assert "Preview candidates found" in resp.text
+    assert "Agent workflow teardown" in resp.text
+    assert "Opened Threads search" in resp.text
+    assert "implementation details" in resp.text
+    assert "Matches implementation lens." in resp.text
+    assert "Strategy" in resp.text
+    assert "Process details" in resp.text
+    assert "Revise and validate" in resp.text
+    assert f'name="validation_attempt_id" value="{attempt.id}"' in resp.text
+
+
+def test_exploration_revision_uses_natural_language_and_prior_evidence(
+    vault,
+    client,
+):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Founder AI threads",
+        original_request="Find founder AI distribution posts",
+        target_surfaces=["threads.search"],
+    )
+    prior = store.record_validation_attempt(
+        exploration_id=exploration.id,
+        status="failed",
+        strategy_snapshot={"collection_approach": "general search"},
+        process_summary="Found broad AI commentary only.",
+        preview_items=[{"url": "https://threads.test/broad"}],
+        error="No implementation-heavy candidates.",
+        finished_at=_now(),
+    )
+    runner = _SequenceRunner(
+        [
+            json.dumps(
+                {
+                    "target_surfaces": ["threads.search"],
+                    "collection_approach": "Search for founder implementation posts",
+                    "candidate_selection": "Keep concrete distribution examples",
+                    "extraction_approach": "Extract title, URL, and summary",
+                    "stop_limits": {
+                        "max_items": 2,
+                        "max_pages": 1,
+                        "max_scrolls": 1,
+                        "timeout_seconds": 30,
+                    },
+                    "lens_alignment_notes": "Prefer implementation detail.",
+                }
+            ),
+            json.dumps(
+                {
+                    "process_summary": "Retried with narrower distribution terms.",
+                    "preview_items": [
+                        {
+                            "url": "https://threads.test/narrow",
+                            "title": "Founder distribution detail",
+                            "summary": "Concrete distribution example.",
+                        }
+                    ],
+                    "preview_lens_matches": [],
+                    "raw_trace": {"steps": ["search narrow terms"]},
+                    "chromux_session_ids": ["exploration-review"],
+                    "error": "",
+                }
+            ),
+        ]
+    )
+
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        resp = client.post(
+            f"/explorations/{exploration.id}/revise",
+            data={
+                "revision_instruction": "Narrow this to concrete distribution details",
+                "prior_attempt_id": str(prior.id),
+            },
+            follow_redirects=False,
+        )
+    finally:
+        set_default_runner(original)
+
+    assert resp.status_code == 303
+    assert "Revision+validation+attempt+2+succeeded" in resp.headers["location"]
+    assert "Narrow this to concrete distribution details" in runner.prompts[0]
+    assert "Found broad AI commentary only." in runner.prompts[0]
+
+    with get_db(vault) as conn:
+        row = conn.execute(
+            """SELECT attempt_number, status, preview_items_json
+               FROM exploration_validation_attempts
+               WHERE exploration_id = ?
+               ORDER BY attempt_number DESC
+               LIMIT 1""",
+            (exploration.id,),
+        ).fetchone()
+
+    assert row["attempt_number"] == 2
+    assert row["status"] == "succeeded"
+    assert json.loads(row["preview_items_json"])[0]["title"] == (
+        "Founder distribution detail"
+    )
+
+
+def test_exploration_revision_requires_instruction(vault, client):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Needs revision",
+        original_request="Find posts",
+    )
+
+    resp = client.post(
+        f"/explorations/{exploration.id}/revise",
+        data={"revision_instruction": "   "},
+    )
+
+    assert resp.status_code == 200
+    assert "Revision instruction is required" in resp.text
