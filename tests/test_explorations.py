@@ -9,6 +9,7 @@ import pytest
 
 from contents_hub.config import WikiConfig
 from contents_hub.db import get_db, init_db
+from contents_hub import explorations as explorations_module
 from contents_hub.explorations import (
     ARTIFACTS_DIRNAME,
     ExplorationStore,
@@ -158,6 +159,40 @@ def test_validation_attempts_keep_history_and_file_backed_trace(vault):
         )
         assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
+
+
+def test_strategy_prompts_reject_builtin_web_fallbacks(vault, tmp_path):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Threads browser proof",
+        original_request="Find recent vibe coding tips on Threads",
+        target_surfaces=["threads.feed", "threads.search"],
+    )
+    strategy = {"stop_limits": {"max_items": 3, "max_scrolls": 2}}
+
+    validation_prompt = explorations_module._strategy_validation_prompt(
+        exploration,
+        strategy,
+    )
+    run_prompt = explorations_module._strategy_run_prompt(
+        exploration,
+        strategy,
+        checkpoint_path=tmp_path / "checkpoint.jsonl",
+        timeout_seconds=300,
+    )
+    enrich_prompt = explorations_module._strategy_enrich_prompt(
+        exploration,
+        strategy,
+        candidates=[],
+        checkpoint_path=tmp_path / "checkpoint.jsonl",
+        timeout_seconds=30,
+    )
+
+    for prompt in (validation_prompt, run_prompt, enrich_prompt):
+        assert "chromux" in prompt
+        assert "WebFetch" in prompt
+        assert "WebSearch" in prompt
+        assert "fallback" in prompt
 
 
 def test_exploration_preview_lens_matches_are_artifact_only(vault):
@@ -511,6 +546,14 @@ def test_registered_exploration_manual_run_persists_checkpoint_items_on_timeout(
                             "title": "Checkpoint item",
                             "summary": "Accepted before timeout.",
                             "source_surface": "threads.search",
+                            "visible_metrics": {"likes": 10, "comments": 2},
+                            "top_comments": [
+                                {
+                                    "author": "commenter",
+                                    "text": "Use a typed API contract.",
+                                    "likes": 3,
+                                }
+                            ],
                         }
                     )
                     + "\n"
@@ -544,17 +587,95 @@ def test_registered_exploration_manual_run_persists_checkpoint_items_on_timeout(
     assert run.status == "partial"
     assert run.items_found == 1
     assert run.items_inserted == 1
-    assert run.error == "manual run timed out after 1s"
+    assert run.error == "harvest timed out after 1s"
     assert "Incremental checkpointing is required" in runner.prompts[0]
     with get_db(vault) as conn:
-        raw_item = conn.execute("SELECT title, url FROM raw_items").fetchone()
+        raw_item = conn.execute(
+            "SELECT title, url, metadata_json FROM raw_items"
+        ).fetchone()
         discovery = conn.execute(
             "SELECT owner_type, owner_run_id FROM raw_item_discoveries"
         ).fetchone()
     assert raw_item["title"] == "Checkpoint item"
     assert raw_item["url"] == "https://threads.test/checkpoint/1"
+    metadata = json.loads(raw_item["metadata_json"])
+    assert metadata["source_surface"] == "threads.search"
+    assert metadata["visible_metrics"]["likes"] == 10
+    assert metadata["top_comments"][0]["text"] == "Use a typed API contract."
     assert discovery["owner_type"] == "exploration_run"
     assert discovery["owner_run_id"] == run.id
+
+
+def test_manual_run_checkpoint_later_detail_entry_replaces_list_preview(vault):
+    class _ListThenDetailTimeoutRunner:
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def run(self, prompt, *, max_turns=30, timeout=600.0):
+            self.prompts.append(prompt)
+            checkpoint = next(
+                line
+                for line in prompt.splitlines()
+                if line.endswith(".jsonl")
+                and f"{ARTIFACTS_DIRNAME}/run-" in line.replace("\\", "/")
+            )
+            preview = {
+                "url": "https://threads.test/list-first/1",
+                "title": "Visible card title",
+                "summary": "Visible card only.",
+                "content_html": "",
+                "source_surface": "threads.search",
+                "content_status": "list_preview",
+                "body_status": "list_preview",
+                "rank": 1,
+            }
+            detail = {
+                "url": "https://threads.test/list-first/1",
+                "title": "Detail title",
+                "summary": "Detailed summary wins.",
+                "content_html": "<p>Detailed body wins.</p>",
+                "source_surface": "threads.search",
+                "content_status": "detail_enriched",
+            }
+            with open(checkpoint, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(preview) + "\n")
+                fh.write(json.dumps(detail) + "\n")
+            raise asyncio.TimeoutError()
+
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="List first run",
+        original_request="Find useful implementation posts",
+        target_surfaces=["threads.search"],
+    )
+    attempt = store.record_validation_attempt(
+        exploration_id=exploration.id,
+        status="succeeded",
+        strategy_snapshot={"query": "implementation posts"},
+    )
+    store.approve_strategy(
+        exploration_id=exploration.id,
+        validation_attempt_id=attempt.id,
+    )
+    runner = _ListThenDetailTimeoutRunner()
+
+    run = asyncio.run(
+        ExplorationStrategyRunner(vault, runner=runner).run_registered(
+            exploration.id,
+            timeout=300,
+        )
+    )
+
+    assert run.status == "partial"
+    assert run.items_found == 1
+    assert "This is Phase 1 only" in runner.prompts[0]
+    with get_db(vault) as conn:
+        raw_item = conn.execute(
+            "SELECT title, body, content_summary FROM raw_items"
+        ).fetchone()
+    assert raw_item["title"] == "Detail title"
+    assert raw_item["body"] == "<p>Detailed body wins.</p>"
+    assert raw_item["content_summary"] == "Detailed summary wins."
 
 
 def test_exploration_run_lenses_write_lens_inbox_metadata_shape(vault):
@@ -888,6 +1009,11 @@ def test_subscription_persistence_records_discovery_attribution(vault):
                     title="A",
                     summary="Summary",
                     published_at=now,
+                    extra={
+                        "content_status": "detail_enriched",
+                        "outbound_urls": ["https://docs.test/contract"],
+                        "visible_metrics": {"comments": 4},
+                    },
                 )
             ],
             sub_id,
@@ -909,10 +1035,16 @@ def test_subscription_persistence_records_discovery_attribution(vault):
         assert summary["inserted"] == 1
         assert duplicate["skipped"] == 1
         raw_count = conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0]
+        raw_metadata = json.loads(
+            conn.execute("SELECT metadata_json FROM raw_items").fetchone()[0]
+        )
         discovery_count = conn.execute(
             "SELECT COUNT(*) FROM raw_item_discoveries"
         ).fetchone()[0]
         assert raw_count == 1
+        assert raw_metadata["content_status"] == "detail_enriched"
+        assert raw_metadata["outbound_urls"] == ["https://docs.test/contract"]
+        assert raw_metadata["visible_metrics"]["comments"] == 4
         assert discovery_count == 1
 
 
@@ -930,7 +1062,7 @@ def test_v8_database_migrates_to_exploration_schema(tmp_path):
     migrated = init_db(cfg)
     try:
         assert (
-            migrated.execute("SELECT version FROM schema_version").fetchone()[0] == 10
+            migrated.execute("SELECT version FROM schema_version").fetchone()[0] == 11
         )
         tables = {
             row[0]
@@ -945,6 +1077,10 @@ def test_v8_database_migrates_to_exploration_schema(tmp_path):
             "exploration_runs",
             "raw_item_discoveries",
         }.issubset(tables)
+        raw_item_columns = {
+            row[1] for row in migrated.execute("PRAGMA table_info(raw_items)")
+        }
+        assert "metadata_json" in raw_item_columns
     finally:
         migrated.close()
 

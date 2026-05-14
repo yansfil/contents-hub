@@ -600,6 +600,113 @@ async def test_chromux_extract_supports_structured_attributes(monkeypatch):
     assert "data-urn" in calls[0][3]
 
 
+async def test_chromux_scroll_uses_eval_without_bash(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run_chromux(args, *, env=None, timeout):
+        calls.append(args)
+        assert env["CHROMUX_PROFILE"] == "contents-hub"
+        return subprocess.CompletedProcess(args, 0, stdout="true", stderr="")
+
+    monkeypatch.setattr("contents_hub.tools.browser._run_chromux", fake_run_chromux)
+    monkeypatch.setattr(
+        "contents_hub.tools.browser.resolve_chromux_profile", lambda profile=None: "contents-hub"
+    )
+
+    from contents_hub.tools.browser import chromux_scroll_handler
+
+    result = json.loads(
+        await chromux_scroll_handler(
+            session="explore-threads-001",
+            direction="down",
+            pixels=1200,
+            wait_ms=0,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["pixels"] == 1200
+    assert calls == [
+        ["chromux", "eval", "explore-threads-001", "window.scrollBy(0, 1200); true"]
+    ]
+
+
+async def test_chromux_scroll_extract_dedupes_across_scroll_passes(monkeypatch):
+    calls: list[list[str]] = []
+    extract_outputs = [
+        '[{"href":"https://example.com/a","text":"A"},{"href":"https://example.com/b","text":"B"}]',
+        '[{"href":"https://example.com/b","text":"B again"},{"href":"https://example.com/c","text":"C"}]',
+    ]
+
+    def fake_run_chromux(args, *, env=None, timeout):
+        calls.append(args)
+        assert env["CHROMUX_PROFILE"] == "contents-hub"
+        if "scrollBy" in args[3]:
+            return subprocess.CompletedProcess(args, 0, stdout="true", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout=extract_outputs.pop(0), stderr="")
+
+    monkeypatch.setattr("contents_hub.tools.browser._run_chromux", fake_run_chromux)
+    monkeypatch.setattr(
+        "contents_hub.tools.browser.resolve_chromux_profile", lambda profile=None: "contents-hub"
+    )
+
+    from contents_hub.tools.browser import chromux_scroll_extract_handler
+
+    result = json.loads(
+        await chromux_scroll_extract_handler(
+            session="explore-threads-001",
+            selector="article",
+            attributes=["href", "text"],
+            unique_by="href",
+            max_scrolls=1,
+            limit_per_pass=10,
+            wait_ms=0,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["item_count"] == 3
+    assert [item["href"] for item in result["items"]] == [
+        "https://example.com/a",
+        "https://example.com/b",
+        "https://example.com/c",
+    ]
+    assert result["new_counts"] == [2, 1]
+    assert calls[0][:3] == ["chromux", "eval", "explore-threads-001"]
+    assert "document.querySelectorAll(selector)" in calls[0][3]
+    assert calls[1] == [
+        "chromux",
+        "eval",
+        "explore-threads-001",
+        "window.scrollBy(0, 1000); true",
+    ]
+
+
+async def test_append_checkpoint_writes_jsonl_batch(tmp_path):
+    from contents_hub.tools.checkpoint import append_checkpoint_handler
+
+    checkpoint_path = tmp_path / "run-1.jsonl"
+    result = json.loads(
+        await append_checkpoint_handler(
+            path=str(checkpoint_path),
+            items=[
+                {"url": "https://example.com/a", "title": "A"},
+                {"url": "https://example.com/b", "title": "B"},
+            ],
+        )
+    )
+
+    assert result == {
+        "ok": True,
+        "path": str(checkpoint_path),
+        "items_appended": 2,
+    }
+    assert checkpoint_path.read_text(encoding="utf-8").splitlines() == [
+        '{"url": "https://example.com/a", "title": "A"}',
+        '{"url": "https://example.com/b", "title": "B"}',
+    ]
+
+
 def test_settings_resume_background_kills_foreground_profile(vault, monkeypatch):
     monkeypatch.setattr(
         "contents_hub.web.app.kill_chromux_profile",

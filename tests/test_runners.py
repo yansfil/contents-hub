@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -99,9 +100,8 @@ async def test_runner_executor_uses_default_runner():
 # ---------------------------------------------------------------------------
 
 
-def test_default_tool_registry_has_eight_builtin_tools():
-    """The default registry is pre-populated with the eight builtin tool names
-    enumerated in contracts.md → "ToolRegistry"."""
+def test_default_tool_registry_has_builtin_tools():
+    """The default registry is pre-populated with contractual builtin tools."""
     registry = get_default_registry()
     names = set(registry.list())
     expected = {
@@ -111,6 +111,9 @@ def test_default_tool_registry_has_eight_builtin_tools():
         "parse_json",
         "chromux_navigate",
         "chromux_extract",
+        "chromux_scroll",
+        "chromux_scroll_extract",
+        "append_checkpoint",
         "extract_metadata",
         "persist_raw",
     }
@@ -121,11 +124,24 @@ def test_default_tool_registry_has_eight_builtin_tools():
 async def test_default_browser_tool_lazy_handlers_are_callable():
     """Browser lazy handlers must resolve to coroutine handlers, not ToolSpec objects."""
     registry = get_default_registry()
-    for name in ("chromux_navigate", "chromux_extract"):
+    for name in (
+        "chromux_navigate",
+        "chromux_extract",
+        "chromux_scroll",
+        "chromux_scroll_extract",
+    ):
         spec = registry.get(name)
         assert spec is not None
         result = await spec.handler()
         assert "missing or invalid" in result
+
+
+async def test_default_checkpoint_lazy_handler_is_callable():
+    registry = get_default_registry()
+    spec = registry.get("append_checkpoint")
+    assert spec is not None
+    result = await spec.handler()
+    assert "missing or invalid" in result
 
 
 def test_set_default_registry_swaps_singleton():
@@ -195,6 +211,62 @@ def test_sdk_plugin_path_falls_back_to_legacy_llm_wiki_plugin(tmp_path, monkeypa
     assert _resolve_project_plugin_path() == str(legacy)
 
 
+async def test_claude_sdk_runner_salvages_json_after_reader_error(monkeypatch):
+    """If the SDK reader dies after a valid JSON result, keep the result."""
+    from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
+
+    captured = {}
+
+    async def fake_query(*, prompt, options, transport=None):
+        captured["stderr"] = options.stderr
+        captured["disallowed_tools"] = options.disallowed_tools
+        options.stderr("real stderr line")
+        yield AssistantMessage(
+            content=[TextBlock(text='{"items": []}')],
+            model="fake",
+        )
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="fake",
+            result='{"items": [{"url": "https://example.test"}], "error": ""}',
+        )
+        raise Exception("Command failed with exit code 1")
+
+    monkeypatch.setattr("claude_agent_sdk.query", fake_query)
+
+    runner = ClaudeSDKRunner(tool_registry=ToolRegistry())
+    result = await runner.run("prompt", timeout=1)
+
+    assert captured["stderr"] is not None
+    assert {"WebFetch", "WebSearch"}.issubset(set(captured["disallowed_tools"]))
+    assert json.loads(result)["items"][0]["url"] == "https://example.test"
+
+
+async def test_claude_sdk_runner_includes_stderr_tail_when_no_json(monkeypatch):
+    async def fake_query(*, prompt, options, transport=None):
+        options.stderr("first diagnostic")
+        options.stderr("second diagnostic")
+        raise Exception("Command failed with exit code 1")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("claude_agent_sdk.query", fake_query)
+
+    runner = ClaudeSDKRunner(tool_registry=ToolRegistry())
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await runner.run("prompt", timeout=1)
+
+    message = str(exc_info.value)
+    assert "Command failed with exit code 1" in message
+    assert "Claude stderr tail:" in message
+    assert "first diagnostic" in message
+    assert "second diagnostic" in message
+
+
 def test_default_runner_resolves_rich_builtin_tool_schemas():
     """Default SDK runs should expose concrete ToolSpec schemas, not placeholders."""
     from contents_hub.runners.claude_sdk import _ensure_rich_builtin_tool_specs
@@ -226,6 +298,14 @@ def test_default_runner_resolves_rich_builtin_tool_schemas():
         assert "allOf" not in extract_spec.input_schema
         assert "oneOf" not in extract_spec.input_schema
         assert extract_spec.input_schema["required"] == ["session_id"]
+
+        scroll_extract_spec = get_default_registry().get("chromux_scroll_extract")
+        assert scroll_extract_spec is not None
+        assert scroll_extract_spec.input_schema["required"] == ["session_id", "selector"]
+
+        checkpoint_spec = get_default_registry().get("append_checkpoint")
+        assert checkpoint_spec is not None
+        assert checkpoint_spec.input_schema["required"] == ["path"]
     finally:
         set_default_registry(original)
 

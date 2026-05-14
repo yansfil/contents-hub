@@ -682,7 +682,12 @@ def test_fetch_subscription_content_fetches_only_new_list_items(tmp_path):
                   "summary": "summary",
                   "body_markdown": "body",
                   "published_at": "%s",
-                  "body_status": "full"
+                  "body_status": "full",
+                  "visible_metrics": {"comments": 7},
+                  "outbound_urls": ["https://example.com/reference"],
+                  "top_comments": [
+                    {"author": "reader", "text": "This adds a useful caveat."}
+                  ]
                 }
               ],
               "errors": [],
@@ -709,8 +714,14 @@ def test_fetch_subscription_content_fetches_only_new_list_items(tmp_path):
 
     with sqlite3.connect(cfg.meta_path / "state.db") as conn:
         row = conn.execute(
-            "SELECT title, body, published_at FROM raw_items WHERE subscription_id = ?",
+            """SELECT title, body, published_at, metadata_json
+               FROM raw_items WHERE subscription_id = ?""",
             (int(sub.id),),
         ).fetchone()
 
-    assert row == ("Post 1", "body", published)
+    assert row[:3] == ("Post 1", "body", published)
+    metadata = json.loads(row[3])
+    assert metadata["body_status"] == "full"
+    assert metadata["visible_metrics"]["comments"] == 7
+    assert metadata["outbound_urls"] == ["https://example.com/reference"]
+    assert metadata["top_comments"][0]["text"] == "This adds a useful caveat."

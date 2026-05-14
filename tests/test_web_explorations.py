@@ -432,10 +432,10 @@ def test_registered_exploration_manual_run_persists_raw_items_and_review_links(
     )
     runner = _SequenceRunner(
         [
-            json.dumps(
-                {
-                    "items": [
-                        {
+                json.dumps(
+                    {
+                        "items": [
+                            {
                             "url": "https://threads.test/run/1",
                             "title": "Run item",
                             "summary": "Persist this manual run item.",
@@ -446,7 +446,24 @@ def test_registered_exploration_manual_run_persists_raw_items_and_review_links(
                     "chromux_session_ids": ["manual-run"],
                     "error": "",
                 }
-            )
+            ),
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "url": "https://threads.test/run/1",
+                            "title": "Run item enriched",
+                            "summary": "Persist this enriched manual run item.",
+                            "content_html": "<p>Detail</p>",
+                            "source_surface": "threads.search",
+                            "content_status": "detail_enriched",
+                        }
+                    ],
+                    "raw_trace": {"steps": ["open-detail", "extract"]},
+                    "chromux_session_ids": ["manual-run-detail"],
+                    "error": "",
+                }
+            ),
         ]
     )
 
@@ -462,7 +479,8 @@ def test_registered_exploration_manual_run_persists_raw_items_and_review_links(
 
     assert resp.status_code == 303
     assert "Manual+run+succeeded:+1+found,+1+new" in resp.headers["location"]
-    assert "Run this approved feed exploration once" in runner.prompts[0]
+    assert "Run Phase 1 of this approved feed exploration once" in runner.prompts[0]
+    assert "Run Phase 2 of this approved feed exploration once" in runner.prompts[1]
     with get_db(vault) as conn:
         run = conn.execute(
             """SELECT status, items_found, items_inserted
@@ -481,7 +499,7 @@ def test_registered_exploration_manual_run_persists_raw_items_and_review_links(
     assert run["status"] == "succeeded"
     assert run["items_found"] == 1
     assert run["items_inserted"] == 1
-    assert raw_item["title"] == "Run item"
+    assert raw_item["title"] == "Run item enriched"
     assert raw_item["url"] == "https://threads.test/run/1"
     assert raw_item["subscription_id"] is None
     assert discovery["owner_type"] == "exploration_run"
@@ -565,12 +583,29 @@ def test_exploration_web_journey_draft_validate_approve_run_and_lens_review(
                     ],
                     "raw_trace": {"steps": ["search", "persist"]},
                     "chromux_session_ids": ["run-tab"],
-                    "error": "",
-                }
-            ),
-            json.dumps(
-                {
-                    "matches": [
+                        "error": "",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "items": [
+                            {
+                                "url": "https://threads.test/run/final",
+                                "title": "Final AI implementation",
+                                "summary": "Persisted enriched run item.",
+                                "content_html": "<p>Detail</p>",
+                                "source_surface": "threads.search",
+                                "content_status": "detail_enriched",
+                            }
+                        ],
+                        "raw_trace": {"steps": ["open-detail", "extract"]},
+                        "chromux_session_ids": ["run-detail-tab"],
+                        "error": "",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "matches": [
                         {
                             "id": 1,
                             "summary": "AI implementation match.",

@@ -1,6 +1,6 @@
 ---
 name: contents-hub
-description: Use when the user asks how to use the contents-hub CLI, initialize or target a vault, manage subscriptions, fetch/tick sources, run the daemon, produce digests, or troubleshoot the legacy llm-wiki to contents-hub rename.
+description: Use when the user asks how to use the contents-hub CLI, initialize or target a vault, manage subscriptions, fetch/tick sources, run explorations, manage Lenses, run the daemon, produce digests, or troubleshoot the legacy llm-wiki to contents-hub rename.
 ---
 
 # contents-hub CLI
@@ -17,6 +17,7 @@ contents-hub --help
 contents-hub sub --help
 contents-hub sub add --help
 contents-hub fetch --help
+contents-hub fetch-all --help
 contents-hub daemon --help
 contents-hub explore --help
 contents-hub exploration --help
@@ -90,6 +91,13 @@ contents-hub fetch 15
 contents-hub fetch https://x.com/karpathy --max-items 10
 ```
 
+Fetch every active or error subscription regardless of tick schedule:
+
+```bash
+contents-hub fetch-all
+contents-hub fetch-all --timeout-per-sub 120
+```
+
 Collect all due subscriptions:
 
 ```bash
@@ -134,8 +142,11 @@ Validate, approve, and run an exploration:
 contents-hub exploration list
 contents-hub exploration validate 3
 contents-hub exploration approve 3
+contents-hub exploration approve 3 --attempt-id 12
 contents-hub exploration run 3
+contents-hub exploration run 3 --timeout 600
 contents-hub exploration run-all
+contents-hub exploration run-all --timeout-per-exploration 600
 ```
 
 Explorations are not subscriptions. `explore` / `exploration add` creates a
@@ -143,13 +154,31 @@ draft only; validation must succeed and `exploration approve` must register the
 strategy before `exploration run` can persist raw items. `exploration run-all`
 runs registered explorations sequentially; draft explorations are skipped.
 
+An exploration run is a foreground/manual run. It is currently orchestrated as
+Phase 1 list harvest followed by Phase 2 detail enrichment. The runner creates a
+run-local JSONL checkpoint and exposes an `append_checkpoint` tool so accepted
+candidates can survive a timeout. It also exposes `chromux_scroll` and
+`chromux_scroll_extract` so agents can scroll/extract feed cards without Bash
+loops.
+
+Exploration persistence is idempotent by normalized item URL, not by a feed
+cursor. Re-running the same registered exploration should not create another
+`raw_items` row for the same normalized URL; it records run/discovery
+attribution instead. There is no content-diff snapshot model yet, so changed
+content at the same URL is not tracked as a separate diff.
+
 Create and manage Lens definitions:
 
 ```bash
 contents-hub lens create vibe-coding --name "Vibe coding" --description "Concrete vibe coding workflows" --keyword "바이브코딩" --keyword "Claude Code"
+contents-hub lens create ai-research --disabled
 contents-hub lens list
 contents-hub lens list --format json
+contents-hub lens list --enabled
+contents-hub lens list --disabled
 contents-hub lens update vibe-coding --description "Updated criteria" --keyword "바이브 코딩"
+contents-hub lens update vibe-coding --clear-keywords
+contents-hub lens update vibe-coding --enable
 contents-hub lens update vibe-coding --disable
 contents-hub lens delete vibe-coding
 ```
@@ -157,6 +186,23 @@ contents-hub lens delete vibe-coding
 Lens ids are slugs used by `contents-hub explore --lens-id ...` and
 subscription default Lens settings. Keywords are repeatable; comma-separated
 values are also split.
+
+Lens routing is explicit. Subscriptions use `default_lens_ids`; explorations use
+repeatable `--lens-id`. Only Lens-matched raw items enter the Lens inbox/digest
+flow.
+
+## Chromux Profile Policy
+
+Browser-backed fetches use the shared `contents-hub` Chromux profile, with
+legacy `llm-wiki` fallback for existing login state. The current chromux binary
+is driven through `CHROMUX_PROFILE=<name>`; do not rely on a `--profile` flag.
+
+Background/headless fetches such as `fetch`, `fetch-all`, `tick`, and daemon
+runs should fail with an error if the shared profile is already open in
+foreground/headed mode. Foreground login/settings/exploration flows may ask for
+confirmation before interrupting an existing headless browser. Tracked chromux
+sessions are closed after fetch/exploration runs; the shared profile itself is
+preserved for login state.
 
 ## Source Types
 
@@ -177,10 +223,11 @@ force a recipe/type.
 
 ## Output Contract
 
-`fetch`, `tick`, `daemon run --json`, `sub add`, `sub list --format json`,
-`explore`, lifecycle-changing `exploration` commands, and lifecycle-changing
-`lens` commands are intended to be machine-readable JSON on stdout. If
-debugging failures, inspect logs under the resolved metadata directory:
+`fetch`, `fetch-all`, `tick`, `daemon run --json`, `sub add`,
+`sub list --format json`, `explore`, lifecycle-changing `exploration`
+commands, and lifecycle-changing `lens` commands are intended to be
+machine-readable JSON on stdout. If debugging failures, inspect logs under the
+resolved metadata directory:
 
 ```bash
 tail -n 100 .contents-hub/cli.log

@@ -157,6 +157,25 @@ def test_exploration_cli_validate_approve_and_run(tmp_path, capsys):
                   "chromux_session_ids": ["explore-run-cli"],
                   "error": ""
                 }
+                """,
+                """
+                {
+                  "items": [
+                    {
+                      "url": "https://threads.test/a",
+                      "title": "Tip A enriched",
+                      "summary": "Concrete workflow with details",
+                      "content_html": "<p>Details</p>",
+                      "author": "tester",
+                      "published_at": null,
+                      "source_surface": "threads.search",
+                      "content_status": "detail_enriched"
+                    }
+                  ],
+                  "raw_trace": {"steps": ["open-detail", "extract"]},
+                  "chromux_session_ids": ["explore-run-cli-detail"],
+                  "error": ""
+                }
                 """
             )
         )
@@ -248,6 +267,25 @@ def test_exploration_cli_run_all_runs_registered_only(tmp_path, capsys):
                 {
                   "items": [
                     {
+                      "url": "https://threads.test/run-all-2",
+                      "title": "Run all 2 detail",
+                      "summary": "Second result detail",
+                      "content_html": "<p>Second</p>",
+                      "author": "tester",
+                      "published_at": null,
+                      "source_surface": "threads.feed",
+                      "content_status": "detail_enriched"
+                    }
+                  ],
+                  "raw_trace": {"steps": ["feed-detail"]},
+                  "chromux_session_ids": [],
+                  "error": ""
+                }
+                """,
+                """
+                {
+                  "items": [
+                    {
                       "url": "https://threads.test/run-all-1",
                       "title": "Run all 1",
                       "summary": "First result",
@@ -258,6 +296,25 @@ def test_exploration_cli_run_all_runs_registered_only(tmp_path, capsys):
                     }
                   ],
                   "raw_trace": {"steps": ["search"]},
+                  "chromux_session_ids": [],
+                  "error": ""
+                }
+                """,
+                """
+                {
+                  "items": [
+                    {
+                      "url": "https://threads.test/run-all-1",
+                      "title": "Run all 1 detail",
+                      "summary": "First result detail",
+                      "content_html": "<p>First</p>",
+                      "author": "tester",
+                      "published_at": null,
+                      "source_surface": "threads.search",
+                      "content_status": "detail_enriched"
+                    }
+                  ],
+                  "raw_trace": {"steps": ["search-detail"]},
                   "chromux_session_ids": [],
                   "error": ""
                 }
