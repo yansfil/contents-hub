@@ -40,8 +40,11 @@ def vault(tmp_path):
 
 def test_chromux_profile_state_detects_modes(monkeypatch):
     def fake_run(args, **kwargs):
-        assert args[-1] == "ps"
-        return SimpleNamespace(stdout="llm-wiki 9222\nother 9444\n")
+        if args[-1] == "ps":
+            return SimpleNamespace(stdout="llm-wiki 9222 111\nother 9444 222\n")
+        if args[:3] == ["ps", "-p", "111"]:
+            return SimpleNamespace(stdout="/Applications/Google Chrome --remote-debugging-port=9222")
+        raise AssertionError(args)
 
     class FakeResponse:
         def __init__(self, user_agent: str):
@@ -62,6 +65,21 @@ def test_chromux_profile_state_detects_modes(monkeypatch):
         lambda url, timeout: FakeResponse("Mozilla Chrome/120"),
     )
     assert chromux_profile_state("llm-wiki") == "headed"
+
+    def fake_hidden_run(args, **kwargs):
+        if args[-1] == "ps":
+            return SimpleNamespace(stdout="llm-wiki 9222 333\n")
+        if args[:3] == ["ps", "-p", "333"]:
+            return SimpleNamespace(
+                stdout=(
+                    "/Applications/Google Chrome --remote-debugging-port=9222 "
+                    "--window-position=-10000,-10000 --window-size=1280,900"
+                )
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr("contents_hub.chromux.subprocess.run", fake_hidden_run)
+    assert chromux_profile_state("llm-wiki") == "hidden"
 
 
 def test_resolve_chromux_profile_prefers_canonical_when_no_legacy_exists(
@@ -156,6 +174,46 @@ def test_open_chromux_headed_requires_confirm_then_kills_and_opens(monkeypatch):
     ]
 
 
+def test_open_chromux_headed_requires_confirm_before_killing_hidden(monkeypatch):
+    run_calls: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        run_calls.append(args)
+        if args[-1] == "ps":
+            return SimpleNamespace(stdout="llm-wiki 9222 333\n")
+        if args[:3] == ["ps", "-p", "333"]:
+            return SimpleNamespace(
+                stdout=(
+                    "/Applications/Google Chrome --remote-debugging-port=9222 "
+                    "--window-position=-10000,-10000"
+                )
+            )
+        return SimpleNamespace(stdout="", returncode=0)
+
+    class FakeResponse:
+        def json(self):
+            return {"User-Agent": "Mozilla Chrome/120"}
+
+    monkeypatch.setattr("contents_hub.chromux.subprocess.run", fake_run)
+    monkeypatch.setattr("contents_hub.chromux.httpx.get", lambda url, timeout: FakeResponse())
+    monkeypatch.setattr(
+        "contents_hub.chromux.subprocess.Popen",
+        lambda args, **kwargs: None,
+    )
+
+    first = open_chromux_headed("https://example.com", session="login-1")
+    assert first["status"] == "needs_confirm"
+    assert first["previous_state"] == "hidden"
+    assert "hidden mode" in first["error"]
+    assert not any(call[-2:] == ["kill", "llm-wiki"] for call in run_calls)
+
+    second = open_chromux_headed(
+        "https://example.com", session="login-1", confirmed=True
+    )
+    assert second["status"] == "opened"
+    assert any(call[-2:] == ["kill", "llm-wiki"] for call in run_calls)
+
+
 def test_open_chromux_headed_reopens_blank_tab_when_already_headed(monkeypatch):
     popen_calls: list[list[str]] = []
 
@@ -204,6 +262,26 @@ def test_background_fetch_prepare_fails_when_profile_is_foreground(
     assert "foreground/headed" in result["error"]
     assert "blocked:" in result["error"]
     assert "background chromux fetch blocked" in caplog.text
+
+
+def test_background_fetch_prepare_allows_hidden_profile(monkeypatch):
+    monkeypatch.setattr(
+        "contents_hub.chromux.resolve_chromux_profile",
+        lambda profile=None: "contents-hub",
+    )
+    monkeypatch.setattr(
+        "contents_hub.chromux.chromux_profile_state",
+        lambda profile=None: "hidden",
+    )
+
+    result = prepare_chromux_for_background_fetch()
+
+    assert result == {
+        "ok": True,
+        "status": "ready",
+        "profile": "contents-hub",
+        "error": None,
+    }
 
 
 async def test_collect_due_fails_when_profile_is_foreground(
@@ -293,6 +371,7 @@ async def test_fetch_subscription_closes_tracked_chromux_session(vault, monkeypa
     def fake_run_chromux(args, *, env=None, timeout):
         assert args == ["chromux", "open", "wiki-test", "https://example.com/"]
         assert env["CHROMUX_PROFILE"] == "contents-hub"
+        assert env["CHROMUX_LAUNCH_MODE"] == "hidden"
         return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
 
     def fake_close(session_id, **kwargs):
@@ -437,6 +516,7 @@ async def test_exploration_session_allows_foreground_tools_and_closes_run_sessio
 
     def fake_run_chromux(args, *, env=None, timeout):
         calls.append((args, env["CHROMUX_PROFILE"]))
+        assert env["CHROMUX_LAUNCH_MODE"] == "hidden"
         return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
 
     def fake_close(session_id, **kwargs):
@@ -479,6 +559,7 @@ async def test_chromux_browser_tools_match_current_cli_and_session_alias(monkeyp
     def fake_run_chromux(args, *, env=None, timeout):
         calls.append(args)
         assert env["CHROMUX_PROFILE"] == "contents-hub"
+        assert env["CHROMUX_LAUNCH_MODE"] == "hidden"
         return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(
@@ -531,6 +612,7 @@ async def test_chromux_browser_tool_env_reuses_legacy_profile_when_only_legacy_e
 
     def fake_run_chromux(args, *, env=None, timeout):
         calls.append((args, env["CHROMUX_PROFILE"]))
+        assert env["CHROMUX_LAUNCH_MODE"] == "hidden"
         return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
 
     monkeypatch.setenv("CHROMUX_PROFILES_DIR", str(tmp_path))

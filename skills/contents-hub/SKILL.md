@@ -197,12 +197,14 @@ Browser-backed fetches use the shared `contents-hub` Chromux profile, with
 legacy `llm-wiki` fallback for existing login state. The current chromux binary
 is driven through `CHROMUX_PROFILE=<name>`; do not rely on a `--profile` flag.
 
-Background/headless fetches such as `fetch`, `fetch-all`, `tick`, and daemon
-runs should fail with an error if the shared profile is already open in
-foreground/headed mode. Foreground login/settings/exploration flows may ask for
-confirmation before interrupting an existing headless browser. Tracked chromux
-sessions are closed after fetch/exploration runs; the shared profile itself is
-preserved for login state.
+Background browser-backed fetches such as `fetch`, `fetch-all`, `tick`, daemon
+runs, and exploration runs default to hidden Chromux mode (`CHROMUX_LAUNCH_MODE=hidden`)
+so the shared profile stays in one automation mode instead of bouncing between
+headless and headed Chrome. They should fail with an error only if the shared
+profile is already open in visible foreground/headed mode. Foreground
+login/settings flows may ask for confirmation before interrupting an existing
+hidden/headless automation browser. Tracked chromux sessions are closed after
+fetch/exploration runs; the shared profile itself is preserved for login state.
 
 ## Source Types
 
