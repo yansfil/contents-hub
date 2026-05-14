@@ -507,3 +507,134 @@ def test_manual_run_requires_registered_exploration(vault, client):
     assert "exploration must be approved before manual run" in resp.text
     with get_db(vault) as conn:
         assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 0
+
+
+def test_exploration_web_journey_draft_validate_approve_run_and_lens_review(
+    vault,
+    client,
+):
+    _seed_lens(vault, "ai", name="AI Lens")
+    runner = _SequenceRunner(
+        [
+            json.dumps(
+                {
+                    "target_surfaces": ["threads.search"],
+                    "collection_approach": "Search Threads for AI implementation",
+                    "candidate_selection": "Keep implementation-heavy posts",
+                    "extraction_approach": "Extract title, url, summary",
+                    "stop_limits": {
+                        "max_items": 2,
+                        "max_pages": 1,
+                        "max_scrolls": 1,
+                        "timeout_seconds": 30,
+                    },
+                    "lens_alignment_notes": "Match AI implementation notes.",
+                }
+            ),
+            json.dumps(
+                {
+                    "process_summary": "Validated Threads search path.",
+                    "preview_items": [
+                        {
+                            "url": "https://threads.test/preview",
+                            "title": "Preview AI implementation",
+                            "summary": "Preview only.",
+                        }
+                    ],
+                    "preview_lens_matches": [
+                        {
+                            "url": "https://threads.test/preview",
+                            "lens_id": "ai",
+                            "summary": "Preview match.",
+                        }
+                    ],
+                    "raw_trace": {"steps": ["search", "preview"]},
+                    "chromux_session_ids": ["validation-tab"],
+                    "error": "",
+                }
+            ),
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "url": "https://threads.test/run/final",
+                            "title": "Final AI implementation",
+                            "summary": "Persisted run item.",
+                            "source_surface": "threads.search",
+                        }
+                    ],
+                    "raw_trace": {"steps": ["search", "persist"]},
+                    "chromux_session_ids": ["run-tab"],
+                    "error": "",
+                }
+            ),
+            json.dumps(
+                {
+                    "matches": [
+                        {
+                            "id": 1,
+                            "summary": "AI implementation match.",
+                            "bullets": ["Concrete workflow detail."],
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        draft_resp = client.post(
+            "/explorations/drafts",
+            data={
+                "original_request": "Find AI implementation posts",
+                "display_name": "AI implementation scout",
+                "target_surfaces": "threads.search",
+                "lens_ids": "ai",
+            },
+            follow_redirects=False,
+        )
+        assert draft_resp.status_code == 303
+        with get_db(vault) as conn:
+            exploration_id = conn.execute("SELECT id FROM explorations").fetchone()[0]
+
+        validate_resp = client.post(
+            f"/explorations/{exploration_id}/validate",
+            follow_redirects=False,
+        )
+        assert validate_resp.status_code == 303
+        with get_db(vault) as conn:
+            attempt_id = conn.execute(
+                "SELECT id FROM exploration_validation_attempts"
+            ).fetchone()[0]
+
+        approve_resp = client.post(
+            f"/explorations/{exploration_id}/approve",
+            data={"validation_attempt_id": str(attempt_id)},
+            follow_redirects=False,
+        )
+        assert approve_resp.status_code == 303
+
+        run_resp = client.post(
+            f"/explorations/{exploration_id}/run",
+            follow_redirects=False,
+        )
+    finally:
+        set_default_runner(original)
+
+    assert run_resp.status_code == 303
+    assert "Manual+run+succeeded" in run_resp.headers["location"]
+    detail = client.get(f"/explorations/{exploration_id}")
+    assert "Registered" in detail.text
+    assert "Final AI implementation" in detail.text
+    assert "/lens-inbox?raw_item_id=" in detail.text
+
+    with get_db(vault) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 1
+        assert (
+            conn.execute("SELECT COUNT(*) FROM raw_item_discoveries").fetchone()[0]
+            == 1
+        )
