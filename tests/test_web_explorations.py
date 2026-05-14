@@ -318,3 +318,89 @@ def test_exploration_revision_requires_instruction(vault, client):
 
     assert resp.status_code == 200
     assert "Revision instruction is required" in resp.text
+
+
+def test_exploration_approval_registers_only_successful_validation(vault, client):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Approve me",
+        original_request="Find good Threads posts",
+    )
+    attempt = store.record_validation_attempt(
+        exploration_id=exploration.id,
+        status="succeeded",
+        strategy_snapshot={"collection_approach": "approved strategy"},
+        preview_items=[{"url": "https://threads.test/preview"}],
+        preview_lens_matches=[{"lens_id": "ai", "summary": "match"}],
+        finished_at=_now(),
+    )
+
+    resp = client.post(
+        f"/explorations/{exploration.id}/approve",
+        data={"validation_attempt_id": str(attempt.id)},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    assert "Registered+strategy+version+1" in resp.headers["location"]
+    with get_db(vault) as conn:
+        exploration_row = conn.execute(
+            """SELECT status, approved_strategy_version_id
+               FROM explorations
+               WHERE id = ?""",
+            (exploration.id,),
+        ).fetchone()
+        strategy_row = conn.execute(
+            """SELECT version, strategy_snapshot, validation_attempt_id
+               FROM exploration_strategy_versions
+               WHERE exploration_id = ?""",
+            (exploration.id,),
+        ).fetchone()
+        assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
+
+    assert exploration_row["status"] == "registered"
+    assert exploration_row["approved_strategy_version_id"] is not None
+    assert strategy_row["version"] == 1
+    assert strategy_row["validation_attempt_id"] == attempt.id
+    assert json.loads(strategy_row["strategy_snapshot"]) == {
+        "collection_approach": "approved strategy"
+    }
+
+    detail = client.get(f"/explorations/{exploration.id}")
+    assert detail.status_code == 200
+    assert "Registered" in detail.text
+
+
+def test_exploration_approval_rejects_failed_validation(vault, client):
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Do not approve",
+        original_request="Find posts",
+    )
+    attempt = store.record_validation_attempt(
+        exploration_id=exploration.id,
+        status="failed",
+        strategy_snapshot={"collection_approach": "bad strategy"},
+        error="auth failed",
+        finished_at=_now(),
+    )
+
+    resp = client.post(
+        f"/explorations/{exploration.id}/approve",
+        data={"validation_attempt_id": str(attempt.id)},
+    )
+
+    assert resp.status_code == 200
+    assert "only succeeded validation attempts can be approved" in resp.text
+    with get_db(vault) as conn:
+        exploration_row = conn.execute(
+            "SELECT status, approved_strategy_version_id FROM explorations"
+        ).fetchone()
+        strategy_count = conn.execute(
+            "SELECT COUNT(*) FROM exploration_strategy_versions"
+        ).fetchone()[0]
+
+    assert exploration_row["status"] == "draft"
+    assert exploration_row["approved_strategy_version_id"] is None
+    assert strategy_count == 0
