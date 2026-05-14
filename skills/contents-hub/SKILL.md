@@ -18,6 +18,9 @@ contents-hub sub --help
 contents-hub sub add --help
 contents-hub fetch --help
 contents-hub daemon --help
+contents-hub explore --help
+contents-hub exploration --help
+contents-hub lens --help
 ```
 
 If the command is missing, the local checkout can be installed globally with:
@@ -118,6 +121,43 @@ contents-hub digest
 Digest is a one-shot command. The daemon/fetch loop collects raw items; digest
 scheduling is separate unless another scheduler invokes `contents-hub digest`.
 
+Create an exploration draft from a natural-language request:
+
+```bash
+contents-hub explore "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용"
+contents-hub exploration add "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용" --surface threads.feed --surface threads.search
+```
+
+Validate, approve, and run an exploration:
+
+```bash
+contents-hub exploration list
+contents-hub exploration validate 3
+contents-hub exploration approve 3
+contents-hub exploration run 3
+contents-hub exploration run-all
+```
+
+Explorations are not subscriptions. `explore` / `exploration add` creates a
+draft only; validation must succeed and `exploration approve` must register the
+strategy before `exploration run` can persist raw items. `exploration run-all`
+runs registered explorations sequentially; draft explorations are skipped.
+
+Create and manage Lens definitions:
+
+```bash
+contents-hub lens create vibe-coding --name "Vibe coding" --description "Concrete vibe coding workflows" --keyword "바이브코딩" --keyword "Claude Code"
+contents-hub lens list
+contents-hub lens list --format json
+contents-hub lens update vibe-coding --description "Updated criteria" --keyword "바이브 코딩"
+contents-hub lens update vibe-coding --disable
+contents-hub lens delete vibe-coding
+```
+
+Lens ids are slugs used by `contents-hub explore --lens-id ...` and
+subscription default Lens settings. Keywords are repeatable; comma-separated
+values are also split.
+
 ## Source Types
 
 Prefer canonical source types when the user asks what to pass to `--type`:
@@ -137,9 +177,10 @@ force a recipe/type.
 
 ## Output Contract
 
-`fetch`, `tick`, `daemon run --json`, `sub add`, and `sub list --format json`
-are intended to be machine-readable JSON on stdout. If debugging failures,
-inspect logs under the resolved metadata directory:
+`fetch`, `tick`, `daemon run --json`, `sub add`, `sub list --format json`,
+`explore`, lifecycle-changing `exploration` commands, and lifecycle-changing
+`lens` commands are intended to be machine-readable JSON on stdout. If
+debugging failures, inspect logs under the resolved metadata directory:
 
 ```bash
 tail -n 100 .contents-hub/cli.log

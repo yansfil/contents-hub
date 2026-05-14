@@ -486,8 +486,75 @@ def test_exploration_run_items_store_exploration_origin_without_subscription(vau
         attribution = conn.execute(
             "SELECT owner_type, owner_id FROM raw_item_discoveries"
         ).fetchone()
-        assert attribution["owner_type"] == "exploration_run"
-        assert attribution["owner_id"] == run.id
+    assert attribution["owner_type"] == "exploration_run"
+    assert attribution["owner_id"] == run.id
+
+
+def test_registered_exploration_manual_run_persists_checkpoint_items_on_timeout(vault):
+    class _CheckpointTimeoutRunner:
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def run(self, prompt, *, max_turns=30, timeout=600.0):
+            self.prompts.append(prompt)
+            checkpoint = next(
+                line
+                for line in prompt.splitlines()
+                if line.endswith(".jsonl")
+                and f"{ARTIFACTS_DIRNAME}/run-" in line.replace("\\", "/")
+            )
+            with open(checkpoint, "a", encoding="utf-8") as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "url": "https://threads.test/checkpoint/1",
+                            "title": "Checkpoint item",
+                            "summary": "Accepted before timeout.",
+                            "source_surface": "threads.search",
+                        }
+                    )
+                    + "\n"
+                )
+            raise asyncio.TimeoutError()
+
+    store = ExplorationStore(vault)
+    exploration = store.create_draft(
+        display_name="Checkpoint run",
+        original_request="Find useful implementation posts",
+        target_surfaces=["threads.search"],
+    )
+    attempt = store.record_validation_attempt(
+        exploration_id=exploration.id,
+        status="succeeded",
+        strategy_snapshot={"query": "implementation posts"},
+    )
+    store.approve_strategy(
+        exploration_id=exploration.id,
+        validation_attempt_id=attempt.id,
+    )
+    runner = _CheckpointTimeoutRunner()
+
+    run = asyncio.run(
+        ExplorationStrategyRunner(vault, runner=runner).run_registered(
+            exploration.id,
+            timeout=1,
+        )
+    )
+
+    assert run.status == "partial"
+    assert run.items_found == 1
+    assert run.items_inserted == 1
+    assert run.error == "manual run timed out after 1s"
+    assert "Incremental checkpointing is required" in runner.prompts[0]
+    with get_db(vault) as conn:
+        raw_item = conn.execute("SELECT title, url FROM raw_items").fetchone()
+        discovery = conn.execute(
+            "SELECT owner_type, owner_run_id FROM raw_item_discoveries"
+        ).fetchone()
+    assert raw_item["title"] == "Checkpoint item"
+    assert raw_item["url"] == "https://threads.test/checkpoint/1"
+    assert discovery["owner_type"] == "exploration_run"
+    assert discovery["owner_run_id"] == run.id
 
 
 def test_exploration_run_lenses_write_lens_inbox_metadata_shape(vault):

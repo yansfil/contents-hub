@@ -109,4 +109,4 @@ ls -l "$HOME/.hermes/skills/contents-hub"
 
 skill 내용을 바꾸면 `skills/contents-hub/SKILL.md` 한 파일만 수정하고 commit 하면 끝이다 — symlink 덕분에 각 runtime이 최신 버전을 본다.
 
-> CLI 명령어 surface(`contents-hub --help`, `sub`, `fetch`, `tick`, `daemon`, `digest`)가 바뀌면 `skills/contents-hub/SKILL.md`도 같은 변경 안에서 함께 업데이트한다.
+> CLI 명령어 surface(`contents-hub --help`, `sub`, `fetch`, `fetch-all`, `tick`, `daemon`, `digest`, `explore`, `exploration`, `lens`)가 바뀌면 `skills/contents-hub/SKILL.md`도 같은 변경 안에서 함께 업데이트한다.
