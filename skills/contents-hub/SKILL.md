@@ -101,6 +101,7 @@ Fetch every active or error subscription regardless of tick schedule:
 ```bash
 contents-hub fetch-all
 contents-hub fetch-all --timeout-per-sub 120
+contents-hub fetch-all --concurrency 3
 ```
 
 Collect all due subscriptions:
@@ -205,14 +206,14 @@ This repo's examples use `CHROMUX_PROFILE` so the same commands can be switched
 to the legacy `llm-wiki` profile when old login state only exists there.
 
 Browser-backed fetches such as `fetch`, `fetch-all`, `tick`, daemon runs, and
-exploration runs default to hidden Chromux mode (`CHROMUX_LAUNCH_MODE=hidden`)
-when the shared profile is not already running. If the shared profile is already
-open in visible headed mode, fetches reuse that visible Chrome profile instead
-of failing or trying to mode-switch it to hidden/headless. Foreground
-login/settings flows may still ask for confirmation before interrupting an
-existing hidden/headless automation browser. Tracked chromux sessions are closed
-after fetch/exploration runs; the shared profile itself is preserved for login
-state.
+exploration runs default to headed Chromux mode with background tab creation
+(`CHROMUX_LAUNCH_MODE=headed`, `CHROMUX_OPEN_BACKGROUND=1`) when the shared
+profile is not already running. If the shared profile is already open in visible
+headed mode, fetches reuse that visible Chrome profile instead of failing or
+trying to mode-switch it to headless. Foreground login/settings flows may still
+ask for confirmation before interrupting an existing headless automation
+browser. Tracked chromux sessions are closed after fetch/exploration runs; the
+shared profile itself is preserved for login state.
 
 ## Source Types
 

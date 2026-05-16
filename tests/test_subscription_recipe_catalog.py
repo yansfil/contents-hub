@@ -648,6 +648,108 @@ def test_collect_all_active_times_out_one_subscription_and_continues(tmp_path, m
     assert calls == [slow.url, fast.url]
 
 
+def test_collect_all_active_concurrency_runs_subscriptions_in_parallel(
+    tmp_path,
+    monkeypatch,
+):
+    cfg = WikiConfig(vault_path=tmp_path)
+    init_db(cfg)
+    store = SubscriptionStore(cfg)
+    first = store.add(
+        url="https://example.com/first.xml",
+        title="First Feed",
+        source_type="rss.feed",
+    )
+    second = store.add(
+        url="https://example.com/second.xml",
+        title="Second Feed",
+        source_type="rss.feed",
+    )
+
+    started: list[str] = []
+    conn_ids: list[int] = []
+    active = 0
+    max_active = 0
+    both_started = asyncio.Event()
+
+    async def fake_incremental_execute(*, conn, sub, sub_id_int, max_items):
+        nonlocal active, max_active
+        started.append(sub.url)
+        conn_ids.append(id(conn))
+        active += 1
+        max_active = max(max_active, active)
+        if len(started) == 2:
+            both_started.set()
+        try:
+            await asyncio.wait_for(both_started.wait(), timeout=0.5)
+            return FetchResult(ok=True, source_url=sub.url, items=[]), 0
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(
+        "contents_hub.api._incremental_executor_execute",
+        fake_incremental_execute,
+    )
+
+    result = asyncio.run(
+        collect_all_active(
+            cfg,
+            per_subscription_timeout_seconds=1.0,
+            concurrency=2,
+        )
+    )
+
+    assert result.total == 2
+    assert result.errors == 0
+    assert max_active == 2
+    assert len(set(conn_ids)) == 2
+    assert [entry.url for entry in result.per_subscription] == [first.url, second.url]
+
+
+def test_collect_all_active_concurrency_preserves_per_sub_timeout(
+    tmp_path,
+    monkeypatch,
+):
+    cfg = WikiConfig(vault_path=tmp_path)
+    init_db(cfg)
+    store = SubscriptionStore(cfg)
+    slow = store.add(
+        url="https://example.com/slow.xml",
+        title="Slow Feed",
+        source_type="rss.feed",
+    )
+    fast = store.add(
+        url="https://example.com/fast.xml",
+        title="Fast Feed",
+        source_type="rss.feed",
+    )
+
+    async def fake_incremental_execute(*, conn, sub, sub_id_int, max_items):
+        if sub.url == slow.url:
+            await asyncio.sleep(0.1)
+        return FetchResult(ok=True, source_url=sub.url, items=[]), 0
+
+    monkeypatch.setattr(
+        "contents_hub.api._incremental_executor_execute",
+        fake_incremental_execute,
+    )
+
+    result = asyncio.run(
+        collect_all_active(
+            cfg,
+            per_subscription_timeout_seconds=0.01,
+            concurrency=2,
+        )
+    )
+
+    assert result.total == 2
+    assert result.errors == 1
+    assert result.per_subscription[0].url == slow.url
+    assert result.per_subscription[0].failure_reason == "timeout"
+    assert result.per_subscription[1].url == fast.url
+    assert result.per_subscription[1].ok is True
+
+
 def test_fetch_subscription_content_fetches_only_new_list_items(tmp_path):
     cfg = WikiConfig(vault_path=tmp_path)
     init_db(cfg)

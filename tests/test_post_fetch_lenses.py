@@ -439,9 +439,11 @@ def test_fetch_all_cli_stdout_remains_single_json_object(monkeypatch, tmp_path, 
         *,
         include_error=False,
         per_subscription_timeout_seconds=120.0,
+        concurrency=1,
     ):
         assert include_error is True
         assert per_subscription_timeout_seconds == 120.0
+        assert concurrency == 1
         return SimpleNamespace(
             total=2,
             new=0,
@@ -466,3 +468,44 @@ def test_fetch_all_cli_stdout_remains_single_json_object(monkeypatch, tmp_path, 
     assert payload["total"] == 2
     assert payload["new_items"] == 0
     assert payload["skipped"] == 2
+
+
+def test_fetch_all_cli_forwards_concurrency(monkeypatch, tmp_path, capsys):
+    _cfg(tmp_path)
+
+    async def _fake_collect_all_active(
+        config,
+        *,
+        include_error=False,
+        per_subscription_timeout_seconds=120.0,
+        concurrency=1,
+    ):
+        assert include_error is True
+        assert per_subscription_timeout_seconds == 5.0
+        assert concurrency == 3
+        return SimpleNamespace(
+            total=0,
+            new=0,
+            skipped=0,
+            errors=0,
+            duration_seconds=0.0,
+            per_subscription=[],
+        )
+
+    monkeypatch.setattr("contents_hub.cli.collect_all_active", _fake_collect_all_active)
+
+    exit_code = cli_main(
+        [
+            "--vault",
+            str(tmp_path),
+            "fetch-all",
+            "--timeout-per-sub",
+            "5",
+            "--concurrency",
+            "3",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["ok"] is True
