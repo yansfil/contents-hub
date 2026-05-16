@@ -91,6 +91,11 @@ contents-hub fetch 15
 contents-hub fetch https://x.com/karpathy --max-items 10
 ```
 
+Subscription fetches use the catalog strategy for the source type and then
+persist raw items. They do not auto-explore a site, rewrite recipes, or relearn
+after failures; repair/discovery work belongs in the separate exploration
+workflow below.
+
 Fetch every active or error subscription regardless of tick schedule:
 
 ```bash
@@ -195,16 +200,19 @@ flow.
 
 Browser-backed fetches use the shared `contents-hub` Chromux profile, with
 legacy `llm-wiki` fallback for existing login state. The current chromux binary
-is driven through `CHROMUX_PROFILE=<name>`; do not rely on a `--profile` flag.
+supports both `CHROMUX_PROFILE=<name>` and `chromux --profile <name> ...`.
+This repo's examples use `CHROMUX_PROFILE` so the same commands can be switched
+to the legacy `llm-wiki` profile when old login state only exists there.
 
-Background browser-backed fetches such as `fetch`, `fetch-all`, `tick`, daemon
-runs, and exploration runs default to hidden Chromux mode (`CHROMUX_LAUNCH_MODE=hidden`)
-so the shared profile stays in one automation mode instead of bouncing between
-headless and headed Chrome. They should fail with an error only if the shared
-profile is already open in visible foreground/headed mode. Foreground
-login/settings flows may ask for confirmation before interrupting an existing
-hidden/headless automation browser. Tracked chromux sessions are closed after
-fetch/exploration runs; the shared profile itself is preserved for login state.
+Browser-backed fetches such as `fetch`, `fetch-all`, `tick`, daemon runs, and
+exploration runs default to hidden Chromux mode (`CHROMUX_LAUNCH_MODE=hidden`)
+when the shared profile is not already running. If the shared profile is already
+open in visible headed mode, fetches reuse that visible Chrome profile instead
+of failing or trying to mode-switch it to hidden/headless. Foreground
+login/settings flows may still ask for confirmation before interrupting an
+existing hidden/headless automation browser. Tracked chromux sessions are closed
+after fetch/exploration runs; the shared profile itself is preserved for login
+state.
 
 ## Source Types
 
@@ -221,7 +229,7 @@ Prefer canonical source types when the user asks what to pass to `--type`:
 - `webpage`
 
 The CLI can infer many URLs, so `--type` is optional unless the user wants to
-force a recipe/type.
+force a source type.
 
 ## Output Contract
 

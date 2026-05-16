@@ -241,7 +241,7 @@ def test_open_chromux_headed_reopens_blank_tab_when_already_headed(monkeypatch):
     ]
 
 
-def test_background_fetch_prepare_fails_when_profile_is_foreground(
+def test_background_fetch_prepare_reuses_foreground_profile(
     monkeypatch, caplog
 ):
     monkeypatch.setattr(
@@ -249,19 +249,20 @@ def test_background_fetch_prepare_fails_when_profile_is_foreground(
         lambda profile=None: "contents-hub",
     )
     monkeypatch.setattr(
-        "contents_hub.chromux.is_chromux_profile_in_foreground",
-        lambda profile=None: True,
+        "contents_hub.chromux.chromux_profile_state",
+        lambda profile=None: "headed",
     )
 
-    with caplog.at_level("WARNING", logger="contents_hub.chromux"):
+    with caplog.at_level("INFO", logger="contents_hub.chromux"):
         result = prepare_chromux_for_background_fetch()
 
-    assert result["ok"] is False
-    assert result["status"] == "profile_in_foreground"
-    assert result["profile"] == "contents-hub"
-    assert "foreground/headed" in result["error"]
-    assert "blocked:" in result["error"]
-    assert "background chromux fetch blocked" in caplog.text
+    assert result == {
+        "ok": True,
+        "status": "foreground_reused",
+        "profile": "contents-hub",
+        "error": None,
+    }
+    assert "reusing visible headed profile" in caplog.text
 
 
 def test_background_fetch_prepare_allows_hidden_profile(monkeypatch):
@@ -284,7 +285,7 @@ def test_background_fetch_prepare_allows_hidden_profile(monkeypatch):
     }
 
 
-async def test_collect_due_fails_when_profile_is_foreground(
+async def test_collect_due_reuses_foreground_profile(
     vault, monkeypatch
 ):
     store = SubscriptionStore(vault)
@@ -296,15 +297,15 @@ async def test_collect_due_fails_when_profile_is_foreground(
     )
 
     async def fake_list_items(sub, **kwargs):
-        raise AssertionError("background fetch should not run while foreground owns profile")
+        return ListFetchResult(ok=True, source_url=sub.url, items=[])
 
     monkeypatch.setattr(
         "contents_hub.api.prepare_chromux_for_background_fetch",
         lambda: {
-            "ok": False,
-            "status": "profile_in_foreground",
+            "ok": True,
+            "status": "foreground_reused",
             "profile": "contents-hub",
-            "error": "blocked: chromux profile 'contents-hub' is currently open in foreground/headed mode",
+            "error": None,
         },
     )
     monkeypatch.setattr("contents_hub.api._executor_list_items", fake_list_items)
@@ -312,14 +313,14 @@ async def test_collect_due_fails_when_profile_is_foreground(
     result = await collect_all_due(vault)
 
     assert result.total == 1
-    assert result.errors == 1
+    assert result.errors == 0
     assert result.skipped == 0
-    assert result.per_subscription[0].ok is False
-    assert result.per_subscription[0].failure_reason == "blocked"
-    assert "foreground/headed" in result.per_subscription[0].error
+    assert result.per_subscription[0].ok is True
+    assert result.per_subscription[0].failure_reason == ""
+    assert result.per_subscription[0].error == ""
 
 
-async def test_fetch_subscription_fails_when_profile_is_foreground(
+async def test_fetch_subscription_reuses_foreground_profile(
     vault, monkeypatch
 ):
     store = SubscriptionStore(vault)
@@ -330,23 +331,23 @@ async def test_fetch_subscription_fails_when_profile_is_foreground(
         config={"fetch_method": "browser"},
     )
     async def fake_list_items(sub, **kwargs):
-        raise AssertionError("background fetch should not run while foreground owns profile")
+        return ListFetchResult(ok=True, source_url=sub.url, items=[])
 
     monkeypatch.setattr(
         "contents_hub.api.prepare_chromux_for_background_fetch",
         lambda: {
-            "ok": False,
-            "status": "profile_in_foreground",
+            "ok": True,
+            "status": "foreground_reused",
             "profile": "contents-hub",
-            "error": "blocked: chromux profile 'contents-hub' is currently open in foreground/headed mode",
+            "error": None,
         },
     )
     monkeypatch.setattr("contents_hub.api._executor_list_items", fake_list_items)
 
     allowed = await fetch_subscription(vault, sub.url)
-    assert allowed.ok is False
-    assert "foreground/headed" in allowed.error
-    assert allowed.failure_reason == "blocked"
+    assert allowed.ok is True
+    assert allowed.error == ""
+    assert allowed.failure_reason == ""
 
 
 async def test_fetch_subscription_closes_tracked_chromux_session(vault, monkeypatch):
@@ -590,18 +591,14 @@ async def test_chromux_browser_tools_match_current_cli_and_session_alias(monkeyp
     assert opened["ok"] is True
     assert text["ok"] is True
     assert links["ok"] is True
-    assert calls == [
-        ["chromux", "open", "exec-linkedin-001", "https://www.linkedin.com/feed/"],
-        ["chromux", "snapshot", "exec-linkedin-001"],
-        [
-            "chromux",
-            "eval",
-            "exec-linkedin-001",
-            "JSON.stringify(Array.from(document.querySelectorAll(\"[data-urn] "
-            "a[href]\")).map(a => ({text: (a.innerText || '').trim(), href: "
-            "a.href})).filter(x => x.href).slice(0, 200))",
-        ],
-    ]
+    assert calls[0] == ["chromux", "open", "exec-linkedin-001", "https://www.linkedin.com/feed/"]
+    assert calls[1] == ["chromux", "snapshot", "exec-linkedin-001"]
+    assert calls[2][:3] == ["chromux", "run", "exec-linkedin-001"]
+    assert (
+        "JSON.stringify(Array.from(document.querySelectorAll("
+        in calls[2][3]
+    )
+    assert "[data-urn] a[href]" in calls[2][3]
 
 
 async def test_chromux_browser_tool_env_reuses_legacy_profile_when_only_legacy_exists(
@@ -677,12 +674,12 @@ async def test_chromux_extract_supports_structured_attributes(monkeypatch):
     assert result["items"] == [{"data-urn": "urn:li:activity:1", "text": "First"}]
     assert result["attributes"] == ["data-urn"]
     assert result["multiple"] is True
-    assert calls[0][:3] == ["chromux", "eval", "exec-linkedin-001"]
+    assert calls[0][:3] == ["chromux", "run", "exec-linkedin-001"]
     assert "document.querySelectorAll(selector)" in calls[0][3]
     assert "data-urn" in calls[0][3]
 
 
-async def test_chromux_scroll_uses_eval_without_bash(monkeypatch):
+async def test_chromux_scroll_uses_run_without_bash(monkeypatch):
     calls: list[list[str]] = []
 
     def fake_run_chromux(args, *, env=None, timeout):
@@ -708,9 +705,8 @@ async def test_chromux_scroll_uses_eval_without_bash(monkeypatch):
 
     assert result["ok"] is True
     assert result["pixels"] == 1200
-    assert calls == [
-        ["chromux", "eval", "explore-threads-001", "window.scrollBy(0, 1200); true"]
-    ]
+    assert calls[0][:3] == ["chromux", "run", "explore-threads-001"]
+    assert "window.scrollBy(0, 1200); true" in calls[0][3]
 
 
 async def test_chromux_scroll_extract_dedupes_across_scroll_passes(monkeypatch):
@@ -754,14 +750,10 @@ async def test_chromux_scroll_extract_dedupes_across_scroll_passes(monkeypatch):
         "https://example.com/c",
     ]
     assert result["new_counts"] == [2, 1]
-    assert calls[0][:3] == ["chromux", "eval", "explore-threads-001"]
+    assert calls[0][:3] == ["chromux", "run", "explore-threads-001"]
     assert "document.querySelectorAll(selector)" in calls[0][3]
-    assert calls[1] == [
-        "chromux",
-        "eval",
-        "explore-threads-001",
-        "window.scrollBy(0, 1000); true",
-    ]
+    assert calls[1][:3] == ["chromux", "run", "explore-threads-001"]
+    assert "window.scrollBy(0, 1000); true" in calls[1][3]
 
 
 async def test_append_checkpoint_writes_jsonl_batch(tmp_path):

@@ -6,7 +6,7 @@ Covers:
   trial-only config keys.
 - /subscriptions/{id}/discard deletes the subscription and its raw_items.
 - /subscriptions/{id}/retry_validation clears trial_result and sample items
-  but preserves trial_pre_recipe and status=validating.
+  while preserving status=validating.
 - The three endpoints are no-ops for non-validating subs.
 """
 
@@ -84,7 +84,7 @@ def _seed_validating_sub(
     store = SubscriptionStore(cfg)
     store.add(url=url, title="Example", source_type=source_type)
     store.set_status(url, SubscriptionStatus.VALIDATING)
-    extras: dict = {"trial_pre_recipe": "", "trial_pre_had_override": False}
+    extras: dict = {}
     if with_trial_result:
         samples = (
             [
@@ -107,10 +107,9 @@ def _seed_validating_sub(
         extras["trial_result"] = {
             "ok": trial_ok,
             "items": len(samples),
-            "error": "" if trial_ok else "explore timed out",
+            "error": "" if trial_ok else "trial timed out",
             "finished_at": datetime.now(timezone.utc).isoformat(),
-            "recipe_mode": "new" if trial_ok else "failed",
-            "recipe": "LIST: ...\nCONTENT: ...\n" if trial_ok else "",
+            "recipe_mode": "catalog" if trial_ok else "failed",
             "samples": samples,
         }
     store.update_config(url, extras)
@@ -141,6 +140,14 @@ def test_validating_status_round_trips(vault):
     store.set_status("https://example.com/", SubscriptionStatus.VALIDATING)
     sub = store.get("https://example.com/")
     assert sub.status == SubscriptionStatus.VALIDATING
+
+
+def test_subscription_relearn_endpoint_is_removed(vault, client):
+    sub_id = _seed_validating_sub(vault)
+
+    resp = client.post(f"/subscriptions/{sub_id}/relearn")
+
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -186,12 +193,10 @@ def test_keep_no_samples_still_activates(vault, client):
     store.update_config(
         "https://example.com/",
         {
-            "trial_pre_recipe": "",
-            "trial_pre_had_override": False,
             "trial_result": {
                 "ok": True, "items": 0, "error": "",
                 "finished_at": datetime.now(timezone.utc).isoformat(),
-                "recipe_mode": "unchanged", "recipe": "", "samples": [],
+                "recipe_mode": "catalog", "samples": [],
             },
         },
     )
@@ -260,14 +265,14 @@ def test_retry_clears_trial_result_and_reruns(vault, client):
     assert resp.json()["status"] == "retrying"
 
     # After retry, the stub fetcher re-populates trial_result (ok, 0 items).
-    # trial_pre_recipe persists so the next success can compute recipe_mode.
     store = SubscriptionStore(vault)
     sub = store.get_by_id(str(sub_id))
     assert sub.status == SubscriptionStatus.VALIDATING
     tr = sub.config["trial_result"]
     assert tr["ok"] is True
     assert tr["items"] == 0
-    assert "trial_pre_recipe" in sub.config
+    assert "trial_pre_recipe" not in sub.config
+    assert tr["recipe_mode"] == "catalog"
 
 
 def test_linkedin_retry_runs_trial_in_headed_mode(vault, client, monkeypatch):

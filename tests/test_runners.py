@@ -72,10 +72,8 @@ async def test_runner_executor_uses_default_runner():
             captured["prompt"] = prompt
             captured["max_turns"] = max_turns
             captured["timeout"] = timeout
-            # Return a recipe-shaped response so EXPLORE → EXECUTE fall-through
-            # isn't required; the executor will record this as a failed
-            # explore (no recipe headers) but the runner WAS called, which is
-            # all we're verifying here.
+            # Return non-item text; this test only verifies the runner call
+            # funnel, not item parsing.
             return "OK"
 
     original = get_default_runner()

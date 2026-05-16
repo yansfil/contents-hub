@@ -68,15 +68,12 @@ def _seed_with_samples(cfg, *, filter_prompt: str) -> int:
         "https://example.com/",
         {
             "filter_prompt": filter_prompt,
-            "trial_pre_recipe": "",
-            "trial_pre_had_override": False,
             "trial_result": {
                 "ok": True,
                 "items": 2,
                 "error": "",
                 "finished_at": datetime.now(timezone.utc).isoformat(),
-                "recipe_mode": "new",
-                "recipe": "LIST: ...",
+                "recipe_mode": "catalog",
                 "samples": [
                     {
                         "url": "https://example.com/ai-post",
@@ -139,12 +136,10 @@ def test_keep_without_filter_prompt_is_still_fine(vault, client, monkeypatch):
     store.update_config(
         "https://example.com/",
         {
-            "trial_pre_recipe": "",
-            "trial_pre_had_override": False,
             "trial_result": {
                 "ok": True, "items": 1, "error": "",
                 "finished_at": datetime.now(timezone.utc).isoformat(),
-                "recipe_mode": "new", "recipe": "",
+                "recipe_mode": "catalog",
                 "samples": [
                     {
                         "url": "https://example.com/x",
