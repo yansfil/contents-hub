@@ -161,7 +161,7 @@ def test_validation_attempts_keep_history_and_file_backed_trace(vault):
         assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
 
 
-def test_strategy_prompts_reject_builtin_web_fallbacks(vault, tmp_path):
+def test_run_prompts_reject_builtin_web_fallbacks(vault, tmp_path):
     store = ExplorationStore(vault)
     exploration = store.create_draft(
         display_name="Threads browser proof",
@@ -170,10 +170,6 @@ def test_strategy_prompts_reject_builtin_web_fallbacks(vault, tmp_path):
     )
     strategy = {"stop_limits": {"max_items": 3, "max_scrolls": 2}}
 
-    validation_prompt = explorations_module._strategy_validation_prompt(
-        exploration,
-        strategy,
-    )
     run_prompt = explorations_module._strategy_run_prompt(
         exploration,
         strategy,
@@ -188,7 +184,7 @@ def test_strategy_prompts_reject_builtin_web_fallbacks(vault, tmp_path):
         timeout_seconds=30,
     )
 
-    for prompt in (validation_prompt, run_prompt, enrich_prompt):
+    for prompt in (run_prompt, enrich_prompt):
         assert "chromux" in prompt
         assert "WebFetch" in prompt
         assert "WebSearch" in prompt
@@ -831,162 +827,25 @@ def test_deleting_exploration_preserves_raw_items_and_tombstones_attribution(vau
         assert "Sensitive full request" not in dict(tombstone).values()
 
 
-class _ExplorationRunnerStub:
-    def __init__(self, *responses: str):
-        self.responses = list(responses)
-        self.calls: list[dict] = []
-
-    async def run(self, prompt: str, *, max_turns: int = 30, timeout: float = 600.0):
-        self.calls.append(
-            {"prompt": prompt, "max_turns": max_turns, "timeout": timeout}
-        )
-        if not self.responses:
-            raise AssertionError("unexpected runner call")
-        response = self.responses.pop(0)
-        if isinstance(response, BaseException):
-            raise response
-        return response
-
-
-@pytest.mark.asyncio
-async def test_strategy_runner_compiles_without_subscription_recipe_fields(vault):
+def test_create_registered_with_recipe_writes_strategy_without_validation(vault):
     store = ExplorationStore(vault)
-    exploration = store.create_draft(
-        display_name="Threads AI builders",
-        original_request="Find thoughtful Threads posts from AI founders",
-        target_surfaces=["threads.feed"],
-        lens_ids=["ai"],
-    )
-    runner = _ExplorationRunnerStub(
-        """
-        {
-          "target_surfaces": ["threads.feed", "threads.search"],
-          "collection_approach": "Open the home feed, then run a search.",
-          "candidate_selection": "Keep founder posts with concrete lessons.",
-          "extraction_approach": "Extract permalink, author, text, and date.",
-          "stop_limits": {
-            "max_items": 4,
-            "max_pages": 2,
-            "max_scrolls": 3,
-            "timeout_seconds": 90
-          },
-          "lens_alignment_notes": "Prefer items matching the ai Lens.",
-          "recipe_id": "must-not-persist"
-        }
-        """
-    )
 
-    strategy = await ExplorationStrategyRunner(vault, runner=runner).compile_strategy(
-        exploration
-    )
-    snapshot = strategy.as_dict()
-
-    assert runner.calls
-    assert "recipe_base" in runner.calls[0]["prompt"]
-    assert snapshot["target_surfaces"] == ["threads.feed", "threads.search"]
-    assert snapshot["collection_approach"] == "Open the home feed, then run a search."
-    assert snapshot["candidate_selection"] == "Keep founder posts with concrete lessons."
-    assert snapshot["extraction_approach"] == "Extract permalink, author, text, and date."
-    assert snapshot["stop_limits"]["max_items"] == 4
-    assert snapshot["lens_alignment_notes"] == "Prefer items matching the ai Lens."
-    assert "recipe_id" not in snapshot
-
-
-@pytest.mark.asyncio
-async def test_validate_draft_records_bounded_preview_as_artifact_only(vault):
-    store = ExplorationStore(vault)
-    exploration = store.create_draft(
+    exploration, strategy = store.create_registered_with_recipe(
         display_name="Threads operators",
         original_request="Find operator posts about AI workflow design",
+        recipe_markdown="\n# Goal\n\nFind operator posts.\n",
         target_surfaces=["threads.search"],
         lens_ids=["ops"],
     )
-    runner = _ExplorationRunnerStub(
-        """
-        {
-          "target_surfaces": ["threads.search"],
-          "collection_approach": "Search Threads for AI workflow design.",
-          "candidate_selection": "Keep concrete operator writeups.",
-          "extraction_approach": "Extract post URL, title, and rationale.",
-          "stop_limits": {
-            "max_items": 2,
-            "max_pages": 1,
-            "max_scrolls": 1,
-            "timeout_seconds": 60
-          },
-          "lens_alignment_notes": "Compare against ops Lens."
-        }
-        """,
-        """
-        {
-          "process_summary": "Searched Threads, sampled two posts, stopped at item cap.",
-          "preview_items": [
-            {"url": "https://threads.test/a", "title": "A"},
-            {"url": "https://threads.test/b", "title": "B"},
-            {"url": "https://threads.test/c", "title": "C"}
-          ],
-          "preview_lens_matches": [
-            {"url": "https://threads.test/a", "lens_id": "ops", "summary": "fits"}
-          ],
-          "raw_trace": {"steps": ["search", "open", "extract"]},
-          "chromux_session_ids": ["explore-1"],
-          "error": ""
-        }
-        """,
-    )
 
-    attempt = await ExplorationStrategyRunner(
-        vault,
-        store=store,
-        runner=runner,
-    ).validate_draft(exploration.id)
-
-    assert len(runner.calls) == 2
-    assert runner.calls[1]["max_turns"] == 4
-    assert runner.calls[1]["timeout"] == 60.0
-    assert attempt.status == "succeeded"
-    assert attempt.strategy_snapshot["target_surfaces"] == ["threads.search"]
-    assert attempt.strategy_snapshot["stop_limits"]["max_items"] == 2
-    assert [item["url"] for item in attempt.preview_items] == [
-        "https://threads.test/a",
-        "https://threads.test/b",
-    ]
-    assert attempt.preview_lens_matches == [
-        {"url": "https://threads.test/a", "lens_id": "ops", "summary": "fits"}
-    ]
-    assert attempt.chromux_session_ids == ["explore-1"]
-    assert attempt.raw_trace_artifact_path is not None
-    assert (vault.meta_path / attempt.raw_trace_artifact_path).exists()
-
+    assert exploration.status == "registered"
+    assert exploration.approved_strategy_version_id == strategy.id
+    assert strategy.version == 1
+    assert strategy.validation_attempt_id is None
+    assert strategy.strategy_snapshot == {"recipe_markdown": "# Goal\n\nFind operator posts."}
     with get_db(vault) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM exploration_validation_attempts").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM raw_items").fetchone()[0] == 0
-        assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
-
-
-@pytest.mark.asyncio
-async def test_validate_draft_failure_does_not_mark_other_explorations_failed(vault):
-    store = ExplorationStore(vault)
-    failing = store.create_draft(
-        display_name="Failing",
-        original_request="Find failing posts",
-    )
-    other = store.create_draft(
-        display_name="Other",
-        original_request="Find unrelated posts",
-        status="registered",
-    )
-    runner = _ExplorationRunnerStub(RuntimeError("agent unavailable"))
-
-    attempt = await ExplorationStrategyRunner(
-        vault,
-        store=store,
-        runner=runner,
-    ).validate_draft(failing.id)
-
-    assert attempt.status == "failed"
-    assert attempt.error == "agent unavailable"
-    assert store.get(failing.id).status == "draft"
-    assert store.get(other.id).status == "registered"
 
 
 def test_subscription_persistence_records_discovery_attribution(vault):

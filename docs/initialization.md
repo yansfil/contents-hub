@@ -75,38 +75,52 @@ contents-hub digest
 
 ## 5. Agent skill 설치 (Claude · Codex · Hermes)
 
-이 repo는 `contents-hub` CLI 사용법을 안내하는 agent skill을 `skills/contents-hub/SKILL.md` 에 source of truth 로 둔다. 각 runtime은 자기 `skills/` 디렉터리 안의 `SKILL.md` 를 자동 로드한다. 한 곳만 수정해도 모든 runtime이 같이 갱신되도록 symlink로 설치한다.
+Agent skill 설치의 자세한 source of truth는 repo 루트의 `install.md`다. 이 repo는 두 skill을 별도로 제공한다.
+
+- `skills/contents-hub/SKILL.md` — CLI, vault, subscription, daemon, digest, registered exploration 실행
+- `skills/contents-hub-explore/SKILL.md` — exploration 설계, chromux probe, recipe 작성, persistent 등록/실행 전 사용자 확인 gate
+
+Codex는 symlink된 `SKILL.md`를 model-visible skill 목록에서 누락할 수 있으므로 실제 파일로 copy한다. Claude Code와 Hermes는 symlink로 repo copy를 가리켜도 된다.
 
 ```bash
 REPO=/Users/hoyeonlee/team-attention/llm-wiki
 
-# Claude Code — 기존 user-scope 사본이 있으면 먼저 제거
-[ -e "$HOME/.claude/skills/contents-hub" ] && [ ! -L "$HOME/.claude/skills/contents-hub" ] \
-  && rm -rf "$HOME/.claude/skills/contents-hub"
-mkdir -p "$HOME/.claude/skills"
-ln -sfn "$REPO/skills/contents-hub" "$HOME/.claude/skills/contents-hub"
+# Codex CLI — SKILL.md는 symlink가 아니라 실제 파일로 copy
+mkdir -p "$HOME/.codex/skills/contents-hub"
+[ -L "$HOME/.codex/skills/contents-hub/SKILL.md" ] && rm "$HOME/.codex/skills/contents-hub/SKILL.md"
+cp "$REPO/skills/contents-hub/SKILL.md" "$HOME/.codex/skills/contents-hub/SKILL.md"
+mkdir -p "$HOME/.codex/skills/contents-hub-explore"
+[ -L "$HOME/.codex/skills/contents-hub-explore/SKILL.md" ] && rm "$HOME/.codex/skills/contents-hub-explore/SKILL.md"
+cp "$REPO/skills/contents-hub-explore/SKILL.md" "$HOME/.codex/skills/contents-hub-explore/SKILL.md"
 
-# Codex CLI
-[ -e "$HOME/.codex/skills/contents-hub" ] && [ ! -L "$HOME/.codex/skills/contents-hub" ] \
-  && rm -rf "$HOME/.codex/skills/contents-hub"
-mkdir -p "$HOME/.codex/skills"
-ln -sfn "$REPO/skills/contents-hub" "$HOME/.codex/skills/contents-hub"
+# Claude Code
+mkdir -p "$HOME/.claude/skills/contents-hub"
+ln -sf "$REPO/skills/contents-hub/SKILL.md" "$HOME/.claude/skills/contents-hub/SKILL.md"
+mkdir -p "$HOME/.claude/skills/contents-hub-explore"
+ln -sf "$REPO/skills/contents-hub-explore/SKILL.md" "$HOME/.claude/skills/contents-hub-explore/SKILL.md"
 
 # Hermes (설치돼 있을 때만; convention: ~/.hermes/skills/<name>/SKILL.md)
-[ -e "$HOME/.hermes/skills/contents-hub" ] && [ ! -L "$HOME/.hermes/skills/contents-hub" ] \
-  && rm -rf "$HOME/.hermes/skills/contents-hub"
-mkdir -p "$HOME/.hermes/skills"
-ln -sfn "$REPO/skills/contents-hub" "$HOME/.hermes/skills/contents-hub"
+mkdir -p "$HOME/.hermes/skills/contents-hub"
+ln -sf "$REPO/skills/contents-hub/SKILL.md" "$HOME/.hermes/skills/contents-hub/SKILL.md"
+mkdir -p "$HOME/.hermes/skills/contents-hub-explore"
+ln -sf "$REPO/skills/contents-hub-explore/SKILL.md" "$HOME/.hermes/skills/contents-hub-explore/SKILL.md"
 ```
 
 설치 후 확인:
 
 ```bash
-ls -l "$HOME/.claude/skills/contents-hub"  # → repo의 skills/contents-hub 로 symlink
-ls -l "$HOME/.codex/skills/contents-hub"
-ls -l "$HOME/.hermes/skills/contents-hub"
+ls -l "$HOME/.codex/skills/contents-hub/SKILL.md"          # regular file
+ls -l "$HOME/.codex/skills/contents-hub-explore/SKILL.md"  # regular file
+ls -l "$HOME/.claude/skills/contents-hub/SKILL.md"         # symlink to repo
+ls -l "$HOME/.claude/skills/contents-hub-explore/SKILL.md" # symlink to repo
+ls -l "$HOME/.hermes/skills/contents-hub/SKILL.md"         # symlink to repo
+ls -l "$HOME/.hermes/skills/contents-hub-explore/SKILL.md" # symlink to repo
 ```
 
-skill 내용을 바꾸면 `skills/contents-hub/SKILL.md` 한 파일만 수정하고 commit 하면 끝이다 — symlink 덕분에 각 runtime이 최신 버전을 본다.
+Codex는 copy 설치이므로 skill 내용을 바꾼 뒤 새 Codex 세션에서 바로 보이게 하려면 위 copy 명령을 다시 실행하거나 `install.md`의 one-pass setup을 다시 실행한다. 가능하면 다음으로 model-visible 상태를 확인한다.
 
-> CLI 명령어 surface(`contents-hub --help`, `sub`, `fetch`, `fetch-all`, `tick`, `daemon`, `digest`, `explore`, `exploration`, `lens`)가 바뀌면 `skills/contents-hub/SKILL.md`도 같은 변경 안에서 함께 업데이트한다.
+```bash
+codex debug prompt-input | rg "contents-hub|contents-hub-explore"
+```
+
+> CLI 명령어 surface(`contents-hub --help`, `sub`, `fetch`, `fetch-all`, `tick`, `daemon`, `digest`, `explore`, `exploration`, `lens`)가 바뀌면 `skills/contents-hub/SKILL.md`도 같은 변경 안에서 함께 업데이트한다. Exploration 설계/등록 lifecycle이 바뀌면 `skills/contents-hub-explore/SKILL.md`도 함께 업데이트한다.

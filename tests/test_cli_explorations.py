@@ -26,7 +26,7 @@ def _read_json(capsys):
     return json.loads(out)
 
 
-def test_explore_cli_creates_draft_not_subscription(tmp_path, capsys):
+def test_explore_cli_requires_recipe_and_creates_no_row(tmp_path, capsys):
     cfg = WikiConfig(vault_path=tmp_path)
     init_db(cfg).close()
 
@@ -44,20 +44,19 @@ def test_explore_cli_creates_draft_not_subscription(tmp_path, capsys):
     )
 
     payload = _read_json(capsys)
-    assert rc == 0
-    assert payload["ok"] is True
-    assert payload["exploration"]["status"] == "draft"
-    assert payload["exploration"]["target_surfaces"] == ["threads.feed"]
-    assert payload["exploration"]["lens_ids"] == ["ai"]
+    assert rc == 1
+    assert payload == {"ok": False, "error": "--recipe is required"}
 
     with get_db(cfg) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM explorations").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM explorations").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0] == 0
 
 
-def test_exploration_cli_validate_approve_and_run(tmp_path, capsys):
+def test_exploration_cli_add_recipe_and_run(tmp_path, capsys):
     cfg = WikiConfig(vault_path=tmp_path)
     init_db(cfg).close()
+    recipe_path = tmp_path / "recipe.md"
+    recipe_path.write_text("# Goal\n\nFind Threads tips.\n", encoding="utf-8")
     create_rc = main(
         [
             "--vault",
@@ -67,74 +66,20 @@ def test_exploration_cli_validate_approve_and_run(tmp_path, capsys):
             "Threads search에서 바이브코딩 팁 찾기",
             "--surface",
             "threads.search",
+            "--recipe",
+            str(recipe_path),
         ]
     )
     created = _read_json(capsys)
     exploration_id = created["exploration"]["exploration_id"]
     assert create_rc == 0
-
-    original = get_default_runner()
-    try:
-        set_default_runner(
-            _SequenceRunner(
-                """
-                {
-                  "target_surfaces": ["threads.search"],
-                  "collection_approach": "Search Threads recent results.",
-                  "candidate_selection": "Prefer concrete vibe coding tips.",
-                  "extraction_approach": "Extract permalink and summary.",
-                  "stop_limits": {
-                    "max_items": 2,
-                    "max_pages": 1,
-                    "max_scrolls": 1,
-                    "timeout_seconds": 60
-                  },
-                  "lens_alignment_notes": "No lens filter."
-                }
-                """,
-                """
-                {
-                  "process_summary": "Searched and found one candidate.",
-                  "preview_items": [
-                    {"url": "https://threads.test/a", "title": "Tip A"}
-                  ],
-                  "preview_lens_matches": [],
-                  "raw_trace": {"steps": ["search"]},
-                  "chromux_session_ids": ["explore-cli"],
-                  "error": ""
-                }
-                """,
-            )
-        )
-        validate_rc = main(
-            [
-                "--vault",
-                str(tmp_path),
-                "exploration",
-                "validate",
-                str(exploration_id),
-            ]
-        )
-        validated = _read_json(capsys)
-    finally:
-        set_default_runner(original)
-
-    assert validate_rc == 0
-    attempt_id = validated["validation_attempt"]["validation_attempt_id"]
-    assert validated["validation_attempt"]["status"] == "succeeded"
-
-    approve_rc = main(
-        [
-            "--vault",
-            str(tmp_path),
-            "exploration",
-            "approve",
-            str(exploration_id),
-        ]
-    )
-    approved = _read_json(capsys)
-    assert approve_rc == 0
-    assert approved["strategy_version"]["validation_attempt_id"] == attempt_id
+    assert created["exploration"]["status"] == "registered"
+    assert created["exploration"]["target_surfaces"] == ["threads.search"]
+    assert created["strategy_version"]["version"] == 1
+    assert created["strategy_version"]["validation_attempt_id"] is None
+    assert created["strategy_version"]["strategy_snapshot"] == {
+        "recipe_markdown": "# Goal\n\nFind Threads tips."
+    }
 
     original = get_default_runner()
     try:
@@ -206,35 +151,32 @@ def test_exploration_cli_validate_approve_and_run(tmp_path, capsys):
         assert raw["subscription_id"] is None
 
 
+def test_removed_exploration_commands_are_absent_from_help(tmp_path, capsys):
+    init_db(WikiConfig(vault_path=tmp_path)).close()
+
+    try:
+        main(["--vault", str(tmp_path), "exploration", "--help"])
+    except SystemExit as exc:
+        assert exc.code == 0
+    out = capsys.readouterr().out
+    assert "validate" not in out
+    assert "approve" not in out
+    assert "revise" not in out
+
+
 def test_exploration_cli_run_all_runs_registered_only(tmp_path, capsys):
     cfg = WikiConfig(vault_path=tmp_path)
     init_db(cfg).close()
     store = ExplorationStore(cfg)
-    first = store.create_draft(
+    first, _ = store.create_registered_with_recipe(
         display_name="First registered",
         original_request="Find first",
+        recipe_markdown="# Goal\n\nFind first",
     )
-    first_attempt = store.record_validation_attempt(
-        exploration_id=first.id,
-        status="succeeded",
-        strategy_snapshot={"target_surfaces": ["threads.search"]},
-    )
-    store.approve_strategy(
-        exploration_id=first.id,
-        validation_attempt_id=first_attempt.id,
-    )
-    second = store.create_draft(
+    second, _ = store.create_registered_with_recipe(
         display_name="Second registered",
         original_request="Find second",
-    )
-    second_attempt = store.record_validation_attempt(
-        exploration_id=second.id,
-        status="succeeded",
-        strategy_snapshot={"target_surfaces": ["threads.feed"]},
-    )
-    store.approve_strategy(
-        exploration_id=second.id,
-        validation_attempt_id=second_attempt.id,
+        recipe_markdown="# Goal\n\nFind second",
     )
     store.create_draft(
         display_name="Draft should not run",

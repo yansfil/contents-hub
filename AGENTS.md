@@ -6,7 +6,7 @@ This file provides guidance to Codex and other coding agents when working with c
 
 - Global CLI installation, vault initialization, and repo-outside usage are documented in `docs/initialization.md`.
 - When changing CLI bootstrap, editable install behavior, `CONTENTS_HUB_VAULT` / legacy `LLM_WIKI_VAULT`, launchd setup, or first-run instructions, update `docs/initialization.md` in the same change.
-- The agent-facing CLI usage guide (consumed by Claude Code / Codex / Hermes) lives at `skills/contents-hub/SKILL.md` — this is the single source of truth; each runtime is installed as a symlink to it (see `docs/initialization.md` §5). When the CLI surface (`contents-hub --help`, `sub`, `fetch`, `tick`, `daemon`, `digest`) changes, update `skills/contents-hub/SKILL.md` in the same change.
+- Agent-facing skills live under `skills/`: `contents-hub` for CLI/vault operations and `contents-hub-explore` for recipe-first exploration design. Runtime registration is documented in `install.md`; Codex installs real `SKILL.md` copies, while Claude Code / Hermes can use symlinks. When the CLI surface (`contents-hub --help`, `sub`, `fetch`, `tick`, `daemon`, `digest`, `explore`, `exploration`, `lens`) changes, update `skills/contents-hub/SKILL.md` in the same change. When the exploration design lifecycle changes, update `skills/contents-hub-explore/SKILL.md`.
 - Claude Code imports this file through `CLAUDE.md` via `@AGENTS.md`; keep this file as the repo-local source of truth.
 
 ## What this is
@@ -87,6 +87,44 @@ Thin abstraction so the agent backend can be swapped.
 - `get_default_runner()` / `set_default_runner()` — process-wide singleton + test override.
 
 **Rule**: if you need an LLM — whether a multi-turn agent with tools (browser fetch) or a single-turn classifier (filter.py) — call `get_default_runner().run(...)`. Do not import `claude_agent_sdk` or `anthropic` from anywhere except `runners/claude_sdk.py`. No module outside runners should require `ANTHROPIC_API_KEY`.
+
+### Browser automation philosophy
+
+The browser layer should follow the core browser-harness philosophy, adapted to
+this repo's `chromux` stack: keep the harness thin, inspectable, and editable;
+let agents add small task/site helpers when something is missing; and preserve
+what actually works as reusable playbooks instead of rediscovering selectors and
+flows every run.
+
+- Prefer a direct browser-control surface over a heavy orchestration layer.
+  `chromux_*` tools should expose small primitives: navigate, extract, scroll,
+  checkpoint, and raw CDP/JS escape hatches. Do not add a manager framework,
+  retry framework, session supervisor, or broad config system unless the current
+  failure mode proves it is necessary.
+- Treat the browser as a stateful runtime, not a stateless HTTP fetch. After any
+  meaningful action, verify the visible/page state before assuming success.
+  Prefer snapshots, extracted visible text, screenshots where useful, and
+  structured trace artifacts over silent success.
+- Use the cheapest suitable surface. Static RSS/YouTube/HTTP paths should stay
+  pure HTTP. Use `chromux` only when login, JS-rendered state, scrolling,
+  cross-origin UI, or human-visible interaction actually matters.
+- For repeated feeds/searches, make the agent capture durable mechanics:
+  repeated card selectors, stable URL patterns, pagination/scroll stop rules,
+  login-wall signals, hidden waits, and extraction fields. Store these as
+  recipe/playbook material, not as one-off run narration.
+- Exploration strategies should behave like editable research recipes. Favor
+  Markdown playbooks over rigid JSON schemas when the core value is an
+  agent-readable sequence of browser actions, skip rules, checkpoint rules, and
+  fallback boundaries. If limits, surfaces, or other run constraints are needed,
+  write them as normal sections in the same Markdown strategy instead of
+  splitting them into a separate metadata contract too early.
+- Checkpoint early in long browser runs. If an item is good enough to enter the
+  review queue, write it through `append_checkpoint` before changing query,
+  surface, or page. A timeout that loses all accepted candidates is a workflow
+  failure.
+- Keep site knowledge public and non-secret. Never persist credentials, cookies,
+  personal data, brittle pixel coordinates, or task diary prose as reusable
+  playbook material.
 
 ### Recipes (`src/llm_wiki/recipes/`)
 

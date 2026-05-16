@@ -1,12 +1,65 @@
 ---
 name: contents-hub
 description: Use when the user asks how to use the contents-hub CLI, initialize or target a vault, manage subscriptions, fetch/tick sources, run explorations, manage Lenses, run the daemon, produce digests, or troubleshoot the legacy llm-wiki to contents-hub rename.
+version: 0.1.0
+platforms: [macos, linux]
+metadata:
+  hermes:
+    tags: [contents, vault, cli, subscriptions]
+    category: productivity
 ---
 
 # contents-hub CLI
 
 Use this skill to answer practical questions about the local `contents-hub`
 command. Prefer concrete commands over theory.
+
+For exploration design sessions that should interview the user, probe browser
+surfaces directly with chromux, iterate on lessons learned, and produce a final
+`recipe.md`, use the dedicated `contents-hub-explore` skill instead of this
+general CLI guide.
+
+## Exploration Ownership
+
+Keep exploration orchestration in this skill and the contents-hub app layer.
+The Agent SDK should be a thin browser executor: it receives an approved
+`recipe.md`-style Markdown playbook, runs the browser steps, checkpoints
+evidence/items, and returns execution results. Do not ask the Agent SDK to own
+user interview, strategy negotiation, recipe revision, approval, or lifecycle
+state.
+
+Preferred exploration loop:
+
+1. Draft a Markdown workflow from the user's request without opening a browser.
+   Include target surfaces, search terms, ranking signals, skip rules,
+   extraction fields, checkpoint expectations, and known risks.
+2. Show the workflow to the user for feedback before browser execution when the
+   request is broad, multi-surface, expensive, or ambiguous.
+3. Probe each target surface independently with chromux. Treat validation as
+   feasibility evidence, not full collection. Persist visible extracts,
+   blocked reasons, session ids, elapsed time, and any sampled candidates even
+   if the final Agent SDK JSON response fails.
+4. Run approved recipes as browser execution jobs. Split list harvest and detail
+   enrichment when useful; checkpoint accepted candidates immediately.
+5. Compile lessons learned from probe/run traces into a revised Markdown recipe,
+   then ask the user whether to approve, revise, or discard it.
+
+User-facing workflow controls should be semantic: surfaces, recency window,
+ranking signals, sample size, required fields, and approval state. Avoid
+surfacing Agent SDK implementation details like turn count as product concepts.
+Internal guardrails such as wall-clock timeout and checkpoint cadence are still
+valid, but they should protect execution rather than define the user's recipe.
+
+Good division of labor:
+
+- `contents-hub` skill/app: asks clarifying questions, drafts `recipe.md`,
+  records attempts, stores traces, compares results, revises recipes, and gates
+  approval.
+- Agent SDK runner: reads the supplied Markdown recipe, uses the allowed
+  contents-hub/chromux tools, writes checkpoints, and returns concise execution
+  evidence.
+- `chromux`: owns real browser state, visible-page verification, extraction,
+  scrolling, and screenshots when useful.
 
 ## First Check
 
@@ -135,30 +188,28 @@ contents-hub digest
 Digest is a one-shot command. The daemon/fetch loop collects raw items; digest
 scheduling is separate unless another scheduler invokes `contents-hub digest`.
 
-Create an exploration draft from a natural-language request:
+Register an exploration from a natural-language request and approved recipe:
 
 ```bash
-contents-hub explore "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용"
-contents-hub exploration add "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용" --surface threads.feed --surface threads.search
+contents-hub explore "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용" --recipe recipe.md
+contents-hub exploration add "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용" --recipe recipe.md --surface threads.feed --surface threads.search
 ```
 
-Validate, approve, and run an exploration:
+Run registered explorations:
 
 ```bash
 contents-hub exploration list
-contents-hub exploration validate 3
-contents-hub exploration approve 3
-contents-hub exploration approve 3 --attempt-id 12
 contents-hub exploration run 3
 contents-hub exploration run 3 --timeout 600
 contents-hub exploration run-all
 contents-hub exploration run-all --timeout-per-exploration 600
 ```
 
-Explorations are not subscriptions. `explore` / `exploration add` creates a
-draft only; validation must succeed and `exploration approve` must register the
-strategy before `exploration run` can persist raw items. `exploration run-all`
-runs registered explorations sequentially; draft explorations are skipped.
+Explorations are not subscriptions. `explore` / `exploration add` requires
+`--recipe` and immediately registers strategy version 1 with the recipe
+Markdown. Missing or empty recipe input returns a JSON error and creates no
+exploration row. `exploration run-all` runs registered explorations
+sequentially; legacy draft explorations are skipped.
 
 An exploration run is a foreground/manual run. It is currently orchestrated as
 Phase 1 list harvest followed by Phase 2 detail enrichment. The runner creates a
