@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -286,10 +287,15 @@ def test_linkedin_retry_runs_trial_in_headed_mode(vault, client, monkeypatch):
         trial_ok=False,
     )
     launches: list[dict] = []
+    closed_sessions: list[str] = []
 
     def fake_open_chromux(url, *, session=None, confirmed=False):
         launches.append({"url": url, "session": session, "confirmed": confirmed})
         return {"status": "opened", "url": url, "previous_state": "headless", "error": None}
+
+    def fake_close(session_id, **kwargs):
+        closed_sessions.append(session_id)
+        return subprocess.CompletedProcess(["chromux", "close", session_id], 0)
 
     async def assert_foreground_executor(*args, **kwargs):
         assert is_foreground_fetch_allowed() is True
@@ -297,6 +303,8 @@ def test_linkedin_retry_runs_trial_in_headed_mode(vault, client, monkeypatch):
 
     monkeypatch.setattr("contents_hub.web.app._open_chromux", fake_open_chromux)
     monkeypatch.setattr("contents_hub.executor.execute_trial", assert_foreground_executor)
+    monkeypatch.setattr("contents_hub.chromux.close_chromux_session", fake_close)
+    monkeypatch.setattr("contents_hub.chromux.list_chromux_sessions", lambda profile=None: set())
 
     resp = client.post(f"/subscriptions/{sub_id}/retry_validation")
 
@@ -309,6 +317,7 @@ def test_linkedin_retry_runs_trial_in_headed_mode(vault, client, monkeypatch):
             "confirmed": True,
         }
     ]
+    assert closed_sessions == [f"trial-{sub_id}"]
 
 
 def test_retry_is_noop_for_active_sub(vault, client):

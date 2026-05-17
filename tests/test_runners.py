@@ -265,6 +265,28 @@ async def test_claude_sdk_runner_includes_stderr_tail_when_no_json(monkeypatch):
     assert "second diagnostic" in message
 
 
+async def test_sdk_tool_adapter_caps_oversized_tool_results():
+    from contents_hub.runners.claude_sdk import _wrap_handler_for_sdk
+
+    async def huge_handler(**_kwargs):
+        return "x" * 40000
+
+    spec = ToolSpec(
+        name="huge_tool",
+        description="returns too much text",
+        input_schema={"type": "object", "properties": {}},
+        handler=huge_handler,
+    )
+
+    adapter = _wrap_handler_for_sdk(spec)
+    result = await adapter({})
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["ok"] is False
+    assert payload["tool"] == "huge_tool"
+    assert payload["truncated"] is True
+    assert payload["original_chars"] == 40000
+
+
 def test_default_runner_resolves_rich_builtin_tool_schemas():
     """Default SDK runs should expose concrete ToolSpec schemas, not placeholders."""
     from contents_hub.runners.claude_sdk import _ensure_rich_builtin_tool_specs

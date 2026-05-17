@@ -1,6 +1,6 @@
 ---
 name: contents-hub-explore
-description: Use when the user invokes /contents-hub-explore, $contents-hub-explore, or asks to design and prove a contents-hub exploration workflow through user interaction, direct chromux probing, iterative lesson-learning, and a final recipe.md for later Agent SDK execution.
+description: Use when the user invokes /contents-hub-explore, $contents-hub-explore, or asks to design and prove a contents-hub exploration workflow through user interaction, direct chromux probing, iterative lesson-learning, and a final recipe.yaml for later Agent SDK execution.
 version: 0.1.0
 platforms: [macos, linux]
 metadata:
@@ -14,8 +14,9 @@ metadata:
 This skill owns the exploration design loop. It is intentionally fatter than the
 Agent SDK runner: interview the user, draft the workflow, use `chromux` directly
 to probe real browser surfaces, revise the workflow from evidence, and produce a
-final `recipe.md`. The Agent SDK should later read that recipe and execute it;
-do not make the Agent SDK invent the exploration plan.
+final `recipe.yaml`. The Agent SDK later reads that recipe as a mission brief,
+executes autonomously, and saves accepted items through the run-aware persistence
+tool; do not make the Agent SDK own the user interview or approval loop.
 
 ## Core Boundary
 
@@ -23,13 +24,13 @@ do not make the Agent SDK invent the exploration plan.
   collection, lesson learned, recipe revision, and final approval.
 - `chromux`: real browser access, visible page checks, extraction, scrolling,
   screenshots, and tab cleanup.
-- Agent SDK: only executes an already-approved Markdown recipe and writes
-  checkpoints/results.
+- Agent SDK: executes an already-approved recipe as one autonomous mission and
+  calls `persist_exploration_raw` for accepted items.
 - `contents-hub` CLI/app: persists explorations, raw items, strategy versions,
   and run history when the current CLI supports the needed operation.
 
 Do not ask contents-hub to draft, validate, or approve the strategy. This skill
-produces the recipe; contents-hub only registers the final Markdown and runs it.
+produces the recipe; contents-hub only registers the final recipe and runs it.
 
 ## Workflow
 
@@ -53,7 +54,7 @@ first workflow and ask for feedback.
 
 ### 2. Draft Workflow V1
 
-Create a Markdown workflow before opening the browser. Include:
+Create a brief workflow draft before opening the browser. Include:
 
 ```md
 # Goal
@@ -118,69 +119,62 @@ Then revise the workflow into Recipe V2. If the evidence changes the product
 direction, ask the user before continuing. If the evidence only changes tactical
 browser steps, update the recipe directly.
 
-### 5. Produce Final recipe.md
+### 5. Produce Final recipe.yaml
 
-The final artifact is a Markdown recipe suitable for an Agent SDK executor to
-read without renegotiating strategy. It should be specific enough to run and
-flexible enough to survive minor UI drift.
+The final artifact should usually be a simple YAML recipe. The recipe's job is
+only to collect `raw_items`; Lens selection is outside the recipe. If no Lens is
+selected when the exploration is registered, contents-hub evaluates all enabled
+Lenses by default after raw items are persisted.
 
-Recommended shape:
+Use this main template:
 
-```md
-# Goal
-
-# Scope
-
-# Surfaces
-
-## threads.search
-
-### Entry URLs
-
-### Search Terms
-
-### Candidate Selector Notes
-
-### Ranking Signals
-
-### Harvest Fields
-
-### Blocked/Skip Conditions
-
-## x.search
-
-...
-
-## reddit.search
-
-...
-
-# Execution Phases
-
-## Phase 1: List Harvest
-
-## Phase 2: Detail Enrichment
-
-# Checkpoint Contract
-
-# Output Item Schema
-
-# Lessons Learned
+```yaml
+goal: Collect useful raw_items for the request.
+keep:
+  - Concrete item rule.
+  - Another useful keep rule.
+skip:
+  - Explicit exclusion.
+  - Another skip rule.
+sources:
+  - surface: news
+    search: "AI news May 16"
+  - surface: web
+    search: "agentic workflow May 16"
+  - surface: x
+    search: "Claude Code workflow"
+  - surface: reddit
+    search: "vibe coding agent workflow"
+  - surface: linkedin
+    search: "AI agent workflow"
+runtime:
+  max_minutes: 10
+  target_items: 12
 ```
 
-The recipe must tell the executor:
+Keep the schema intentionally small:
 
-- where to start
-- what to search
-- what candidates to keep or skip
-- which fields to extract
-- when to checkpoint
-- what counts as blocked
-- when to stop a surface
-- what evidence to return
+- `goal`: one sentence describing the raw-item collection target.
+- `keep`: what should enter the raw item queue.
+- `skip`: what should be ignored.
+- `sources`: advisory surface/query starting points. The harness does not fan
+  them out; the autonomous agent chooses how to use or delegate them.
+- `surface`: short surface id such as `news`, `web`, `x`, `reddit`, `threads`,
+  `linkedin`, or `youtube`.
+- `search`, `url`, or `urls`: where the agent should start.
+- `runtime.max_minutes`: optional wall-clock cap for the run.
+- `runtime.target_items`: optional target number of qualifying raw items.
 
-Keep implementation constraints as normal Markdown sections, not a separate
-JSON metadata contract unless the CLI/app explicitly requires one.
+The harness stays thin: pass the recipe text as the mission brief, inject
+runtime limits, expose `persist_exploration_raw`, dedupe by item key, record
+inserted/skipped/rejected trace events, persist `raw_items`, and evaluate
+Lenses. Do not put Lens ids, reports, digest formatting, or final synthesis
+instructions in the recipe.
+
+If a surface needs more browser detail, put it directly on that source item with
+plain keys such as `entry_url`, `query_hint`, `ranking`, `blocked_when`,
+`selector_note`, or `stop_when`. Avoid inventing a large schema unless the
+current probe proves that field is needed.
 
 ### 6. Show Recipe Summary And Ask
 
@@ -198,7 +192,7 @@ Include:
 - ranking signals
 - accepted/skipped candidate rules
 - output schema highlights
-- execution phases
+- runtime limits and persistence expectations
 - important probe lessons or known risks
 - whether the recipe is ready to register, needs edits, or should only be kept
   as a handoff artifact
@@ -240,7 +234,7 @@ revise the recipe instead of persisting.
 Register the final recipe file with contents-hub:
 
 ```bash
-contents-hub exploration add "request..." --recipe recipe.md --surface threads.search
+contents-hub exploration add "request..." --recipe recipe.yaml
 ```
 
 Use the current CLI only after inspecting it when the runtime may be stale:
@@ -263,7 +257,7 @@ if the user explicitly confirmed that run in the persistence gate.
 - Do not use WebFetch/WebSearch as a substitute for browser-backed surfaces
   when the recipe is meant to prove chromux behavior.
 - Do not make Agent SDK turn count a user-facing workflow concept. Use semantic
-  limits such as recency, sample size, surface priority, and checkpoint points.
+  limits such as recency, sample size, surface priority, and persistence timing.
 - If using a real vault, say which vault path is being modified before creating
   persistent exploration records.
 - Never create, register, run, or run-all an exploration in a real vault without

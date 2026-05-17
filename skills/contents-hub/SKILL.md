@@ -16,48 +16,49 @@ command. Prefer concrete commands over theory.
 
 For exploration design sessions that should interview the user, probe browser
 surfaces directly with chromux, iterate on lessons learned, and produce a final
-`recipe.md`, use the dedicated `contents-hub-explore` skill instead of this
+`recipe.yaml`, use the dedicated `contents-hub-explore` skill instead of this
 general CLI guide.
 
 ## Exploration Ownership
 
 Keep exploration orchestration in this skill and the contents-hub app layer.
-The Agent SDK should be a thin browser executor: it receives an approved
-`recipe.md`-style Markdown playbook, runs the browser steps, checkpoints
-evidence/items, and returns execution results. Do not ask the Agent SDK to own
+The Agent SDK receives an approved natural-language mission recipe, browses and
+judges autonomously, may delegate or parallelize if useful, and saves qualifying
+items through the run-aware persistence tool. Do not ask the Agent SDK to own
 user interview, strategy negotiation, recipe revision, approval, or lifecycle
 state.
 
 Preferred exploration loop:
 
-1. Draft a Markdown workflow from the user's request without opening a browser.
+1. Draft a recipe workflow from the user's request without opening a browser.
    Include target surfaces, search terms, ranking signals, skip rules,
-   extraction fields, checkpoint expectations, and known risks.
+   extraction fields, persistence expectations, and known risks.
 2. Show the workflow to the user for feedback before browser execution when the
    request is broad, multi-surface, expensive, or ambiguous.
 3. Probe each target surface independently with chromux. Treat validation as
    feasibility evidence, not full collection. Persist visible extracts,
    blocked reasons, session ids, elapsed time, and any sampled candidates even
    if the final Agent SDK JSON response fails.
-4. Run approved recipes as browser execution jobs. Split list harvest and detail
-   enrichment when useful; checkpoint accepted candidates immediately.
-5. Compile lessons learned from probe/run traces into a revised Markdown recipe,
+4. Run approved recipes as one autonomous Agent SDK mission. The harness creates
+   the run record, injects timeout/target item budget, exposes
+   `persist_exploration_raw`, and records save/skip/reject trace events.
+5. Compile lessons learned from probe/run traces into a revised recipe,
    then ask the user whether to approve, revise, or discard it.
 
 User-facing workflow controls should be semantic: surfaces, recency window,
 ranking signals, sample size, required fields, and approval state. Avoid
 surfacing Agent SDK implementation details like turn count as product concepts.
-Internal guardrails such as wall-clock timeout and checkpoint cadence are still
+Internal guardrails such as wall-clock timeout and persistence cadence are still
 valid, but they should protect execution rather than define the user's recipe.
 
 Good division of labor:
 
-- `contents-hub` skill/app: asks clarifying questions, drafts `recipe.md`,
+- `contents-hub` skill/app: asks clarifying questions, drafts `recipe.yaml`,
   records attempts, stores traces, compares results, revises recipes, and gates
   approval.
-- Agent SDK runner: reads the supplied Markdown recipe, uses the allowed
-  contents-hub/chromux tools, writes checkpoints, and returns concise execution
-  evidence.
+- Agent SDK runner: reads the supplied recipe, uses the allowed
+  contents-hub/chromux tools, calls `persist_exploration_raw` for accepted
+  items, and returns concise execution evidence.
 - `chromux`: owns real browser state, visible-page verification, extraction,
   scrolling, and screenshots when useful.
 
@@ -191,8 +192,8 @@ scheduling is separate unless another scheduler invokes `contents-hub digest`.
 Register an exploration from a natural-language request and approved recipe:
 
 ```bash
-contents-hub explore "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용" --recipe recipe.md
-contents-hub exploration add "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용" --recipe recipe.md --surface threads.feed --surface threads.search
+contents-hub explore "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용" --recipe recipe.yaml
+contents-hub exploration add "Threads feed에서 최근 바이브코딩 노하우 글을 찾고 검색도 같이 활용" --recipe recipe.yaml
 ```
 
 Run registered explorations:
@@ -207,16 +208,20 @@ contents-hub exploration run-all --timeout-per-exploration 600
 
 Explorations are not subscriptions. `explore` / `exploration add` requires
 `--recipe` and immediately registers strategy version 1 with the recipe
-Markdown. Missing or empty recipe input returns a JSON error and creates no
-exploration row. `exploration run-all` runs registered explorations
+Markdown or YAML. Missing or empty recipe input returns a JSON error and creates
+no exploration row. `exploration run-all` runs registered explorations
 sequentially; legacy draft explorations are skipped.
 
-An exploration run is a foreground/manual run. It is currently orchestrated as
-Phase 1 list harvest followed by Phase 2 detail enrichment. The runner creates a
-run-local JSONL checkpoint and exposes an `append_checkpoint` tool so accepted
-candidates can survive a timeout. It also exposes `chromux_scroll` and
-`chromux_scroll_extract` so agents can scroll/extract feed cards without Bash
-loops.
+An exploration run is a foreground/manual run. It now uses a single autonomous
+Agent SDK path for Markdown or YAML recipes. Recipe fields such as `sources`,
+`surfaces`, `steps`, or `fanout` are mission context only; they do not activate
+harness-owned harvest/enrich/checkpoint orchestration. In v1, only
+`runtime.max_minutes` and `runtime.target_items` are interpreted as structured
+controls. The runner exposes `persist_exploration_raw` so accepted candidates
+are written directly to `raw_items` during the run, and the tool records
+inserted/skipped/rejected trace events so partial progress survives timeouts. It
+also exposes `chromux_scroll` and `chromux_scroll_extract` so agents
+can scroll/extract feed cards without Bash loops.
 
 Exploration persistence is idempotent by normalized item URL, not by a feed
 cursor. Re-running the same registered exploration should not create another

@@ -249,7 +249,7 @@ class TestParseJson:
 
 class TestFetchUrl:
     @respx.mock
-    async def test_success(self):
+    async def test_success_compacts_feed_by_default(self):
         respx.get("https://example.com/feed.xml").respond(
             200, text=RSS2_XML, headers={"content-type": "application/rss+xml"}
         )
@@ -257,7 +257,102 @@ class TestFetchUrl:
         result = json.loads(out)
         assert result["ok"] is True
         assert result["status"] == 200
+        assert result["mode"] == "feed"
+        assert result["feed_title"] == "My Blog"
+        assert result["body"] == ""
+        assert result["items"][0]["title"] == "First Post"
+
+    @respx.mock
+    async def test_raw_mode_preserves_original_body(self):
+        respx.get("https://example.com/feed.xml").respond(
+            200, text=RSS2_XML, headers={"content-type": "application/rss+xml"}
+        )
+        out = await fetch_url("https://example.com/feed.xml", mode="raw", max_chars=0)
+        result = json.loads(out)
+        assert result["ok"] is True
+        assert result["mode"] == "raw"
         assert "My Blog" in result["body"]
+
+    @respx.mock
+    async def test_html_mode_extracts_readable_text_and_links(self):
+        html = """
+        <html><head><title>Page</title></head>
+        <body><nav>ignore</nav><article><h1>Hello</h1>
+        <p>Useful body text.</p><a href="/next">Next</a></article></body></html>
+        """
+        respx.get("https://example.com/post").respond(
+            200, text=html, headers={"content-type": "text/html"}
+        )
+        out = await fetch_url("https://example.com/post", max_chars=100)
+        result = json.loads(out)
+        assert result["ok"] is True
+        assert result["mode"] == "html"
+        assert result["title"] == "Page"
+        assert "Useful body text." in result["markdown"]
+        assert result["links"] == [{"url": "https://example.com/next", "text": "Next"}]
+
+    @respx.mock
+    async def test_headers_are_compacted(self):
+        respx.get("https://example.com/post").respond(
+            200,
+            text="<html><body>ok</body></html>",
+            headers={
+                "content-type": "text/html",
+                "content-security-policy": "x" * 1000,
+                "set-cookie": "secret=value",
+            },
+        )
+        out = await fetch_url("https://example.com/post")
+        result = json.loads(out)
+        assert result["headers"]["content-type"] == "text/html"
+        assert "content-length" in result["headers"]
+        assert "content-security-policy" not in result["headers"]
+        assert "set-cookie" not in result["headers"]
+
+    @respx.mock
+    async def test_reddit_detail_json_flattens_listing_children(self):
+        payload = [
+            {
+                "kind": "Listing",
+                "data": {
+                    "children": [
+                        {
+                            "kind": "t3",
+                            "data": {
+                                "title": "Post title",
+                                "permalink": "/r/test/comments/abc/post_title/",
+                                "selftext": "Post body",
+                                "author": "alice",
+                            },
+                        }
+                    ]
+                },
+            },
+            {
+                "kind": "Listing",
+                "data": {
+                    "children": [
+                        {
+                            "kind": "t1",
+                            "data": {
+                                "body": "Useful comment",
+                                "permalink": "/r/test/comments/abc/post_title/def/",
+                                "author": "bob",
+                            },
+                        }
+                    ]
+                },
+            },
+        ]
+        respx.get("https://www.reddit.com/r/test/comments/abc/post_title/.json").respond(
+            200, json=payload, headers={"content-type": "application/json"}
+        )
+        out = await fetch_url("https://www.reddit.com/r/test/comments/abc/post_title/.json")
+        result = json.loads(out)
+        assert result["mode"] == "json"
+        assert result["items"][0]["title"] == "Post title"
+        assert result["items"][0]["url"] == "https://www.reddit.com/r/test/comments/abc/post_title/"
+        assert result["items"][1]["summary"] == "Useful comment"
 
     @respx.mock
     async def test_404(self):

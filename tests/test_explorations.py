@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import subprocess
 from datetime import datetime, timezone
 
 import pytest
@@ -22,6 +23,7 @@ from contents_hub.lenses import (
 )
 from contents_hub.models import FetchedItem
 from contents_hub.runners import get_default_runner, set_default_runner
+from contents_hub.tools import get_default_registry
 from contents_hub.tools.storage import persist_raw_sync
 
 
@@ -72,6 +74,12 @@ class _SequenceRunner:
         if not self.responses:
             raise AssertionError("runner called more times than expected")
         return self.responses.pop(0)
+
+
+async def _persist_exploration_items(items: list[dict]) -> None:
+    spec = get_default_registry().get("persist_exploration_raw")
+    assert spec is not None
+    await spec.handler(items=items)
 
 
 def _seed_lens(
@@ -161,7 +169,7 @@ def test_validation_attempts_keep_history_and_file_backed_trace(vault):
         assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
 
 
-def test_run_prompts_reject_builtin_web_fallbacks(vault, tmp_path):
+def test_autonomous_prompt_rejects_builtin_web_fallbacks(vault):
     store = ExplorationStore(vault)
     exploration = store.create_draft(
         display_name="Threads browser proof",
@@ -170,25 +178,18 @@ def test_run_prompts_reject_builtin_web_fallbacks(vault, tmp_path):
     )
     strategy = {"stop_limits": {"max_items": 3, "max_scrolls": 2}}
 
-    run_prompt = explorations_module._strategy_run_prompt(
+    prompt = explorations_module._strategy_autonomous_prompt(
         exploration,
         strategy,
-        checkpoint_path=tmp_path / "checkpoint.jsonl",
         timeout_seconds=300,
-    )
-    enrich_prompt = explorations_module._strategy_enrich_prompt(
-        exploration,
-        strategy,
-        candidates=[],
-        checkpoint_path=tmp_path / "checkpoint.jsonl",
-        timeout_seconds=30,
+        target_items=3,
     )
 
-    for prompt in (run_prompt, enrich_prompt):
-        assert "chromux" in prompt
-        assert "WebFetch" in prompt
-        assert "WebSearch" in prompt
-        assert "fallback" in prompt
+    assert "chromux" in prompt
+    assert "WebFetch" in prompt
+    assert "WebSearch" in prompt
+    assert "not available" in prompt
+    assert "single autonomous mission" in prompt
 
 
 def test_exploration_preview_lens_matches_are_artifact_only(vault):
@@ -521,39 +522,33 @@ def test_exploration_run_items_store_exploration_origin_without_subscription(vau
     assert attribution["owner_id"] == run.id
 
 
-def test_registered_exploration_manual_run_persists_checkpoint_items_on_timeout(vault):
-    class _CheckpointTimeoutRunner:
+def test_registered_exploration_manual_run_persists_tool_items_on_timeout(vault):
+    class _ToolTimeoutRunner:
         def __init__(self):
             self.prompts: list[str] = []
 
         async def run(self, prompt, *, max_turns=30, timeout=600.0):
             self.prompts.append(prompt)
-            checkpoint = next(
-                line
-                for line in prompt.splitlines()
-                if line.endswith(".jsonl")
-                and f"{ARTIFACTS_DIRNAME}/run-" in line.replace("\\", "/")
+            await _persist_exploration_items(
+                [
+                    {
+                        "url": "https://threads.test/checkpoint/1",
+                        "title": "Tool item",
+                        "summary": "Accepted before timeout.",
+                        "source_surface": "threads.search",
+                        "selection_reason": "Concrete implementation detail.",
+                        "content_status": "detail_enriched",
+                        "visible_metrics": {"likes": 10, "comments": 2},
+                        "top_comments": [
+                            {
+                                "author": "commenter",
+                                "text": "Use a typed API contract.",
+                                "likes": 3,
+                            }
+                        ],
+                    }
+                ]
             )
-            with open(checkpoint, "a", encoding="utf-8") as fh:
-                fh.write(
-                    json.dumps(
-                        {
-                            "url": "https://threads.test/checkpoint/1",
-                            "title": "Checkpoint item",
-                            "summary": "Accepted before timeout.",
-                            "source_surface": "threads.search",
-                            "visible_metrics": {"likes": 10, "comments": 2},
-                            "top_comments": [
-                                {
-                                    "author": "commenter",
-                                    "text": "Use a typed API contract.",
-                                    "likes": 3,
-                                }
-                            ],
-                        }
-                    )
-                    + "\n"
-                )
             raise asyncio.TimeoutError()
 
     store = ExplorationStore(vault)
@@ -571,7 +566,7 @@ def test_registered_exploration_manual_run_persists_checkpoint_items_on_timeout(
         exploration_id=exploration.id,
         validation_attempt_id=attempt.id,
     )
-    runner = _CheckpointTimeoutRunner()
+    runner = _ToolTimeoutRunner()
 
     run = asyncio.run(
         ExplorationStrategyRunner(vault, runner=runner).run_registered(
@@ -583,8 +578,9 @@ def test_registered_exploration_manual_run_persists_checkpoint_items_on_timeout(
     assert run.status == "partial"
     assert run.items_found == 1
     assert run.items_inserted == 1
-    assert run.error == "harvest timed out after 1s"
-    assert "Incremental checkpointing is required" in runner.prompts[0]
+    assert run.error == "autonomous exploration timed out after 1s"
+    assert "persist_exploration_raw" in runner.prompts[0]
+    assert "Do not use append_checkpoint" in runner.prompts[0]
     with get_db(vault) as conn:
         raw_item = conn.execute(
             "SELECT title, url, metadata_json FROM raw_items"
@@ -592,7 +588,7 @@ def test_registered_exploration_manual_run_persists_checkpoint_items_on_timeout(
         discovery = conn.execute(
             "SELECT owner_type, owner_run_id FROM raw_item_discoveries"
         ).fetchone()
-    assert raw_item["title"] == "Checkpoint item"
+    assert raw_item["title"] == "Tool item"
     assert raw_item["url"] == "https://threads.test/checkpoint/1"
     metadata = json.loads(raw_item["metadata_json"])
     assert metadata["source_surface"] == "threads.search"
@@ -602,41 +598,33 @@ def test_registered_exploration_manual_run_persists_checkpoint_items_on_timeout(
     assert discovery["owner_run_id"] == run.id
 
 
-def test_manual_run_checkpoint_later_detail_entry_replaces_list_preview(vault):
-    class _ListThenDetailTimeoutRunner:
+def test_manual_run_duplicate_tool_call_records_skip_event(vault):
+    class _DuplicateToolRunner:
         def __init__(self):
             self.prompts: list[str] = []
 
         async def run(self, prompt, *, max_turns=30, timeout=600.0):
             self.prompts.append(prompt)
-            checkpoint = next(
-                line
-                for line in prompt.splitlines()
-                if line.endswith(".jsonl")
-                and f"{ARTIFACTS_DIRNAME}/run-" in line.replace("\\", "/")
-            )
-            preview = {
+            item = {
                 "url": "https://threads.test/list-first/1",
                 "title": "Visible card title",
                 "summary": "Visible card only.",
-                "content_html": "",
                 "source_surface": "threads.search",
+                "selection_reason": "Useful visible implementation note.",
                 "content_status": "list_preview",
-                "body_status": "list_preview",
                 "rank": 1,
             }
-            detail = {
-                "url": "https://threads.test/list-first/1",
-                "title": "Detail title",
-                "summary": "Detailed summary wins.",
-                "content_html": "<p>Detailed body wins.</p>",
-                "source_surface": "threads.search",
-                "content_status": "detail_enriched",
-            }
-            with open(checkpoint, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(preview) + "\n")
-                fh.write(json.dumps(detail) + "\n")
-            raise asyncio.TimeoutError()
+            await _persist_exploration_items([item])
+            await _persist_exploration_items([dict(item, title="Duplicate card")])
+            return json.dumps(
+                {
+                    "summary": "saved then deduped",
+                    "sources_attempted": ["threads.search"],
+                    "stopped_reason": "complete",
+                    "chromux_session_ids": [],
+                    "error": "",
+                }
+            )
 
     store = ExplorationStore(vault)
     exploration = store.create_draft(
@@ -653,7 +641,183 @@ def test_manual_run_checkpoint_later_detail_entry_replaces_list_preview(vault):
         exploration_id=exploration.id,
         validation_attempt_id=attempt.id,
     )
-    runner = _ListThenDetailTimeoutRunner()
+    runner = _DuplicateToolRunner()
+
+    run = asyncio.run(
+        ExplorationStrategyRunner(vault, runner=runner).run_registered(
+            exploration.id,
+            timeout=300,
+        )
+    )
+
+    assert run.status == "succeeded"
+    assert run.items_found == 2
+    assert run.items_inserted == 1
+    assert "single autonomous mission" in runner.prompts[0]
+    with get_db(vault) as conn:
+        raw_item = conn.execute(
+            "SELECT title, body, content_summary FROM raw_items"
+        ).fetchone()
+        trace_path = conn.execute(
+            "SELECT raw_trace_artifact_path FROM exploration_runs WHERE id = ?",
+            (run.id,),
+        ).fetchone()["raw_trace_artifact_path"]
+    trace = json.loads((vault.meta_path / trace_path).read_text(encoding="utf-8"))
+    assert raw_item["title"] == "Visible card title"
+    assert raw_item["content_summary"] == "Visible card only."
+    assert [event["status"] for event in trace["persist_events"]] == [
+        "inserted",
+        "skipped",
+    ]
+
+
+def test_autonomous_run_closes_and_records_new_chromux_sessions(vault, monkeypatch):
+    class _ChromuxSessionRunner:
+        async def run(self, prompt, *, max_turns=30, timeout=600.0):
+            await _persist_exploration_items(
+                [
+                    {
+                        "url": "https://threads.test/chromux-cleanup",
+                        "title": "Cleanup candidate",
+                        "summary": "Persisted while browser tab was open.",
+                        "source_surface": "threads.search",
+                        "selection_reason": "Useful implementation detail.",
+                        "content_status": "list_preview",
+                    }
+                ]
+            )
+            return json.dumps(
+                {
+                    "summary": "saved through browser",
+                    "sources_attempted": ["threads.search"],
+                    "stopped_reason": "complete",
+                    "chromux_session_ids": [],
+                    "error": "",
+                }
+            )
+
+    snapshots = iter(
+        [
+            {"existing-tab"},
+            {"existing-tab", "bash-opened-tab"},
+        ]
+    )
+    closed_sessions: list[str] = []
+
+    monkeypatch.setattr(
+        explorations_module,
+        "resolve_chromux_profile",
+        lambda profile=None: profile or "contents-hub",
+    )
+    monkeypatch.setattr(
+        "contents_hub.chromux.resolve_chromux_profile",
+        lambda profile=None: profile or "contents-hub",
+    )
+    monkeypatch.setattr(
+        "contents_hub.chromux.list_chromux_sessions",
+        lambda profile=None: set(next(snapshots)),
+    )
+
+    def fake_close(session_id, **kwargs):
+        closed_sessions.append(session_id)
+        return subprocess.CompletedProcess(["chromux", "close", session_id], 0)
+
+    monkeypatch.setattr("contents_hub.chromux.close_chromux_session", fake_close)
+
+    store = ExplorationStore(vault)
+    exploration, _strategy = store.create_registered_with_recipe(
+        display_name="Cleanup run",
+        original_request="Find useful implementation posts",
+        recipe_markdown="goal: collect useful implementation posts",
+    )
+
+    run = asyncio.run(
+        ExplorationStrategyRunner(vault, runner=_ChromuxSessionRunner()).run_registered(
+            exploration.id,
+            timeout=300,
+        )
+    )
+
+    assert run.status == "succeeded"
+    assert run.chromux_session_ids == ["bash-opened-tab"]
+    assert closed_sessions == ["bash-opened-tab"]
+    trace = json.loads(
+        (vault.meta_path / str(run.raw_trace_artifact_path)).read_text(encoding="utf-8")
+    )
+    assert trace["chromux_session_ids"] == ["bash-opened-tab"]
+
+
+def test_autonomous_tool_registry_is_narrow(vault):
+    store = ExplorationStore(vault)
+    exploration, strategy = store.create_registered_with_recipe(
+        display_name="Narrow tool run",
+        original_request="Find useful implementation posts",
+        recipe_markdown="goal: collect useful implementation posts",
+    )
+    run = store.record_run(
+        exploration_id=exploration.id,
+        strategy_version_id=strategy.id,
+        status="running",
+    )
+
+    registry = explorations_module._autonomous_tool_registry(
+        config=vault,
+        store=store,
+        exploration=exploration,
+        strategy=strategy,
+        run=run,
+    )
+
+    assert set(registry.list()) == {
+        "fetch_url",
+        "chromux_navigate",
+        "chromux_extract",
+        "chromux_scroll",
+        "chromux_scroll_extract",
+        "persist_exploration_raw",
+    }
+
+
+def test_legacy_recipe_workflow_fields_are_context_only(vault):
+    class _AutonomousLegacyRecipeRunner:
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def run(self, prompt, *, max_turns=30, timeout=600.0):
+            self.prompts.append(prompt)
+            if "Run Phase 2 of this approved feed exploration once" in prompt:
+                raise AssertionError("enrich should be skipped after harvest error")
+            if "Run one fanout item" in prompt:
+                raise AssertionError("legacy fanout should not execute")
+            await _persist_exploration_items(
+                [
+                    {
+                        "url": "https://news.test/partial",
+                        "title": "Partial direct item",
+                        "summary": "Persisted before timeout.",
+                        "source_surface": "news",
+                        "selection_reason": "Matches the legacy recipe goal.",
+                        "content_status": "list_preview",
+                    }
+                ]
+            )
+            raise asyncio.TimeoutError()
+
+    store = ExplorationStore(vault)
+    exploration, _ = store.create_registered_with_recipe(
+        display_name="Partial recipe run",
+        original_request="Find news and social tips",
+        recipe_markdown="""
+goal: Find useful items.
+steps:
+  - name: news
+    fanout:
+      - surface: news
+        search: AI news
+        limit: 2
+""".strip(),
+    )
+    runner = _AutonomousLegacyRecipeRunner()
 
     run = asyncio.run(
         ExplorationStrategyRunner(vault, runner=runner).run_registered(
@@ -664,14 +828,20 @@ def test_manual_run_checkpoint_later_detail_entry_replaces_list_preview(vault):
 
     assert run.status == "partial"
     assert run.items_found == 1
-    assert "This is Phase 1 only" in runner.prompts[0]
+    assert run.items_inserted == 1
+    assert run.error == "autonomous exploration timed out after 300s"
+    assert len(runner.prompts) == 1
     with get_db(vault) as conn:
-        raw_item = conn.execute(
-            "SELECT title, body, content_summary FROM raw_items"
-        ).fetchone()
-    assert raw_item["title"] == "Detail title"
-    assert raw_item["body"] == "<p>Detailed body wins.</p>"
-    assert raw_item["content_summary"] == "Detailed summary wins."
+        raw_item = conn.execute("SELECT title, url FROM raw_items").fetchone()
+        trace_path = conn.execute(
+            "SELECT raw_trace_artifact_path FROM exploration_runs WHERE id = ?",
+            (run.id,),
+        ).fetchone()["raw_trace_artifact_path"]
+    trace = json.loads((vault.meta_path / trace_path).read_text(encoding="utf-8"))
+    assert raw_item["title"] == "Partial direct item"
+    assert raw_item["url"] == "https://news.test/partial"
+    assert trace["orchestration"] == "autonomous_agent"
+    assert trace["persist_summary"]["inserted"] == 1
 
 
 def test_exploration_run_lenses_write_lens_inbox_metadata_shape(vault):

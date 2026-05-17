@@ -14,6 +14,7 @@ from contents_hub.chromux import (
     PROFILE_SWITCH_NEEDS_CONFIRM_REASON,
     ChromuxExplorationSessionError,
     chromux_exploration_session,
+    chromux_fetch_session_cleanup,
     chromux_foreground_fetch,
     chromux_profile_state,
     open_chromux_headed,
@@ -382,6 +383,37 @@ async def test_fetch_subscription_closes_tracked_chromux_session(vault, monkeypa
 
     assert result.ok is True
     assert closed_sessions == ["wiki-test"]
+
+
+async def test_chromux_cleanup_closes_new_untracked_sessions(monkeypatch):
+    snapshots = iter(
+        [
+            {"already-open"},
+            {"already-open", "bash-opened"},
+        ]
+    )
+    closed_sessions: list[str] = []
+
+    monkeypatch.setattr(
+        "contents_hub.chromux.resolve_chromux_profile",
+        lambda profile=None: profile or "contents-hub",
+    )
+    monkeypatch.setattr(
+        "contents_hub.chromux.list_chromux_sessions",
+        lambda profile=None: set(next(snapshots)),
+    )
+
+    def fake_close(session_id, **kwargs):
+        closed_sessions.append(session_id)
+        return subprocess.CompletedProcess(["chromux", "close", session_id], 0)
+
+    monkeypatch.setattr("contents_hub.chromux.close_chromux_session", fake_close)
+
+    async with chromux_fetch_session_cleanup(profile="contents-hub") as sessions:
+        assert sessions == set()
+
+    assert closed_sessions == ["bash-opened"]
+    assert sessions == {"bash-opened"}
 
 
 async def test_foreground_fetch_context_allows_headed_chromux_navigation(monkeypatch):

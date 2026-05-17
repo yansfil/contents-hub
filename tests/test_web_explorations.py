@@ -10,6 +10,7 @@ from contents_hub.config import WikiConfig
 from contents_hub.db import get_db, init_db
 from contents_hub.explorations import ExplorationStore
 from contents_hub.runners import get_default_runner, set_default_runner
+from contents_hub.tools import get_default_registry
 from contents_hub.web.app import create_app
 
 
@@ -57,7 +58,28 @@ class _SequenceRunner:
         self.prompts.append(prompt)
         if not self.responses:
             raise AssertionError("runner called more times than expected")
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        payload = json.loads(response)
+        if "items" in payload:
+            spec = get_default_registry().get("persist_exploration_raw")
+            assert spec is not None
+            items = []
+            for item in payload["items"]:
+                item = dict(item)
+                item.setdefault("selection_reason", "test candidate")
+                item.setdefault("content_status", "detail_enriched")
+                items.append(item)
+            await spec.handler(items=items)
+            return json.dumps(
+                {
+                    "summary": "persisted test items",
+                    "sources_attempted": ["test"],
+                    "stopped_reason": "complete",
+                    "chromux_session_ids": payload.get("chromux_session_ids", []),
+                    "error": payload.get("error", ""),
+                }
+            )
+        return response
 
 
 def test_exploration_creation_page_exposes_request_surfaces_lenses_and_name(
@@ -226,32 +248,18 @@ def test_registered_exploration_manual_run_persists_raw_items_and_review_links(
                     {
                         "items": [
                             {
-                            "url": "https://threads.test/run/1",
-                            "title": "Run item",
-                            "summary": "Persist this manual run item.",
-                            "source_surface": "threads.search",
-                        }
-                    ],
-                    "raw_trace": {"steps": ["open", "extract"]},
-                    "chromux_session_ids": ["manual-run"],
-                    "error": "",
-                }
-            ),
-            json.dumps(
-                {
-                    "items": [
-                        {
-                            "url": "https://threads.test/run/1",
-                            "title": "Run item enriched",
-                            "summary": "Persist this enriched manual run item.",
-                            "content_html": "<p>Detail</p>",
-                            "source_surface": "threads.search",
-                            "content_status": "detail_enriched",
-                        }
-                    ],
-                    "raw_trace": {"steps": ["open-detail", "extract"]},
-                    "chromux_session_ids": ["manual-run-detail"],
-                    "error": "",
+                                "url": "https://threads.test/run/1",
+                                "title": "Run item enriched",
+                                "summary": "Persist this enriched manual run item.",
+                                "content_html": "<p>Detail</p>",
+                                "source_surface": "threads.search",
+                                "selection_reason": "Relevant implementation post.",
+                                "content_status": "detail_enriched",
+                            }
+                        ],
+                        "raw_trace": {"steps": ["open", "extract"]},
+                        "chromux_session_ids": ["manual-run"],
+                        "error": "",
                 }
             ),
         ]
@@ -269,8 +277,8 @@ def test_registered_exploration_manual_run_persists_raw_items_and_review_links(
 
     assert resp.status_code == 303
     assert "Manual+run+succeeded:+1+found,+1+new" in resp.headers["location"]
-    assert "Run Phase 1 of this approved feed exploration once" in runner.prompts[0]
-    assert "Run Phase 2 of this approved feed exploration once" in runner.prompts[1]
+    assert "single autonomous mission" in runner.prompts[0]
+    assert len(runner.prompts) == 1
     with get_db(vault) as conn:
         run = conn.execute(
             """SELECT status, items_found, items_inserted
@@ -332,27 +340,12 @@ def test_exploration_web_journey_register_run_and_lens_review(
                             "title": "Final AI implementation",
                             "summary": "Persisted run item.",
                             "source_surface": "threads.search",
+                            "selection_reason": "Relevant AI implementation.",
+                            "content_status": "detail_enriched",
                         }
                     ],
                     "raw_trace": {"steps": ["search", "persist"]},
                     "chromux_session_ids": ["run-tab"],
-                        "error": "",
-                    }
-                ),
-                json.dumps(
-                    {
-                        "items": [
-                            {
-                                "url": "https://threads.test/run/final",
-                                "title": "Final AI implementation",
-                                "summary": "Persisted enriched run item.",
-                                "content_html": "<p>Detail</p>",
-                                "source_surface": "threads.search",
-                                "content_status": "detail_enriched",
-                            }
-                        ],
-                        "raw_trace": {"steps": ["open-detail", "extract"]},
-                        "chromux_session_ids": ["run-detail-tab"],
                         "error": "",
                     }
                 ),
