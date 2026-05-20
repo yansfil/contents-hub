@@ -16,8 +16,14 @@ command. Prefer concrete commands over theory.
 
 For exploration design sessions that should interview the user, probe browser
 surfaces directly with chromux, iterate on lessons learned, and produce a final
-`recipe.yaml`, use the dedicated `contents-hub-explore` skill instead of this
-general CLI guide.
+`recipe.yaml`, use the Exploration Ownership section below and
+`references/exploration-design-loop.md`.
+
+For the user's live cron/vault deployment and post-update audit procedure, see
+`references/local-cron-ops.md`.
+
+For RSS/feed timeout debugging and the GeekNews direct-parser fast-path lesson,
+see `references/rss-fast-path-debugging.md`.
 
 ## Exploration Ownership
 
@@ -27,6 +33,10 @@ judges autonomously, may delegate or parallelize if useful, and saves qualifying
 items through the run-aware persistence tool. Do not ask the Agent SDK to own
 user interview, strategy negotiation, recipe revision, approval, or lifecycle
 state.
+
+Use `references/exploration-design-loop.md` when the task is specifically to
+design and prove an exploration workflow through interview, direct chromux
+probes, iterative lessons learned, and a final `recipe.yaml`.
 
 Preferred exploration loop:
 
@@ -78,11 +88,20 @@ contents-hub exploration --help
 contents-hub lens --help
 ```
 
-If the command is missing, the local checkout can be installed globally with:
+If the command is missing or stale, install from the user's current durable checkout. On this machine the active checkout is `/Users/grab/projects/contents-hub`; older upstream docs may still show `$HOME/team-attention/llm-wiki`.
 
 ```bash
-uv tool install -e /Users/hoyeonlee/team-attention/llm-wiki --force
+cd /Users/grab/projects/contents-hub
+uv tool install -e "$PWD" --force
 uv tool update-shell
+```
+
+When updating from source, follow `/Users/grab/projects/contents-hub/install.md` end to end: `git fetch`/`git pull --ff-only`, editable `uv tool install`, skill registration, and smoke tests. Check `git status --short --branch` before pulling; do not overwrite tracked local changes.
+
+Skill-registration pitfall: do not make a runtime skill directory a symlink to the repo directory and then write `SKILL.md` through that path. That can create a self-referential symlink loop in the repo (`skills/contents-hub/SKILL.md -> itself`). Use normal runtime directories under `~/.hermes/skills`, `~/.claude/skills`, and `~/.codex/skills`; symlink only the `SKILL.md` file for Hermes/Claude or copy real files for Codex. If a loop appears, restore the tracked file:
+
+```bash
+git -C /Users/grab/projects/contents-hub restore --source=HEAD --staged --worktree skills/contents-hub/SKILL.md
 ```
 
 ## Vault Targeting
@@ -93,6 +112,14 @@ Every command accepts `--vault PATH`. Resolution order is:
 2. `CONTENTS_HUB_VAULT`
 3. legacy `LLM_WIKI_VAULT`
 4. current working directory
+
+For this user's live deployment, use the contents-hub sub-vault, not the Obsidian vault root:
+
+```bash
+contents-hub --vault /Users/grab/hoyeon/contents-hub ...
+```
+
+Pitfall: `/Users/grab/hoyeon` is the Obsidian vault root and may contain its own `.contents-hub/` if a command is accidentally run there. That creates a separate subscription DB that cron jobs do not read. Before adding or troubleshooting subscriptions, compare against the active cron target and, if in doubt, inspect `/Users/grab/.contents-hub/hoyeon-contents-hub/state.db` or run `contents-hub --vault /Users/grab/hoyeon/contents-hub sub list --format json`.
 
 The current canonical metadata paths are:
 
@@ -144,6 +171,14 @@ Fetch one subscription by id or URL:
 contents-hub fetch 15
 contents-hub fetch https://x.com/karpathy --max-items 10
 ```
+
+For RSS feeds, prefer a small smoke fetch first after adding the subscription:
+
+```bash
+contents-hub --vault /Users/grab/hoyeon/contents-hub fetch <subscription_id> --max-items 1
+```
+
+RSS/Atom feeds, including FeedBurner-hosted GeekNews, now use the direct feed parser for both list and content persistence when feed entries include enough metadata. They should not spend minutes fetching/enriching each article page. If a feed fetch/parse fails, the executor falls back to the agent path for compatibility; use `--max-items 1` to distinguish parser/feed failures from downstream agent fallback issues.
 
 Subscription fetches use the catalog strategy for the source type and then
 persist raw items. They do not auto-explore a site, rewrite recipes, or relearn
