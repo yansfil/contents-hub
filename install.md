@@ -193,6 +193,13 @@ one-shot command unless another scheduler invokes it:
 contents-hub digest
 ```
 
+Digest output is DB-backed. Successful runs return `path: null` and are viewed
+through the dashboard:
+
+```bash
+contents-hub web --port 8585
+```
+
 ## Smoke Test
 
 Run this after installing or updating:

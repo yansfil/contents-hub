@@ -185,6 +185,27 @@ def _digest_content(cfg: WikiConfig, digest_id: int) -> str:
     return "" if row is None else row["content_md"]
 
 
+def _digest_row(cfg: WikiConfig, digest_id: int) -> dict:
+    with get_db(cfg) as conn:
+        row = conn.execute(
+            "SELECT * FROM digests WHERE id = ?",
+            (digest_id,),
+        ).fetchone()
+    return {} if row is None else dict(row)
+
+
+def _digest_section_item_rows(cfg: WikiConfig, digest_id: int) -> list[dict]:
+    with get_db(cfg) as conn:
+        rows = conn.execute(
+            """SELECT digest_id, section_index, lens_id, raw_item_id, sort_order
+               FROM digest_section_items
+               WHERE digest_id = ?
+               ORDER BY section_index, sort_order, raw_item_id""",
+            (digest_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 # ---------------------------------------------------------------------------
 # Test class — covers R-B1.1, R-B6.4, R-T10.1, R-T16.1, R-U5.2 + INV 1..8.
 # ---------------------------------------------------------------------------
@@ -304,7 +325,7 @@ class TestLensZeroUnmatchedGroup:
         assert result["ok"] is True
         assert result["item_count"] == 2
         assert isinstance(result["digest_id"], int)
-        assert result["path"] and Path(result["path"]).exists()
+        assert result["path"] is None
 
         # 1 group narrative + 1 executive = 2 runner.run calls.
         assert len(stub_runner.calls) == 2
@@ -404,9 +425,9 @@ class TestIdempotencyTransaction:
 
 
 class TestJSONStdoutShape:
-    """R-U2.1 / R-U2.3 / R-T12.2 — exactly one JSON line on stdout, both paths."""
+    """R-U2.1 / R-U2.3 / R-T12.2 — exactly one JSON line on stdout."""
 
-    def test_success_stdout_single_json_line_with_absolute_path(
+    def test_success_stdout_single_json_line_db_only_path_null(
         self, vault, stub_runner, tmp_path
     ):
         _seed_lensed_items(vault, item_lens_pairs=[(1, "ai"), (2, "rust")])
@@ -424,12 +445,7 @@ class TestJSONStdoutShape:
         assert payload["ok"] is True
         assert isinstance(payload["digest_id"], int)
         assert payload["item_count"] == 2
-        assert isinstance(payload["path"], str)
-        path = Path(payload["path"])
-        assert path.is_absolute()
-        assert path.exists()
-        # INV-7 — confined under <vault>/digests/.
-        assert path.is_relative_to(vault.digests_path)
+        assert payload["path"] is None
 
     def test_failure_stdout_single_json_line(self, vault, tmp_path):
         """LLM failure → stdout has exactly one ``ok:false`` JSON line."""
@@ -712,16 +728,12 @@ _SRC = _REPO_ROOT / "src" / "llm_wiki"
 
 
 class TestDoNotTouchRegression:
-    """R-T16.1 — files in the do-not-touch list have NO digest references.
-
-    R-T16 enumerates: api.py, daemon.py, executor.py, filter.py,
-    lenses.py, promote.py, web/app.py, web/templates/*, all fetcher
-    files. None of these may carry digest-related additions.
+    """R-T16.1 — non-web do-not-touch files have NO digest references.
 
     We assert by string scan rather than git-blob comparison because the
     test must not invoke git (INV-1). A negative search for the token
-    ``digest`` is strict enough — if any of these files acquires digest
-    code in a future round, the token will appear and the test fails.
+    ``digest`` is strict enough for the non-web runtime surfaces. The web
+    dashboard is now the intended digest display surface.
     """
 
     DO_NOT_TOUCH = [
@@ -731,7 +743,6 @@ class TestDoNotTouchRegression:
         _SRC / "filter.py",
         _SRC / "lenses.py",
         _SRC / "promote.py",
-        _SRC / "web" / "app.py",
     ]
 
     def test_listed_files_contain_no_digest_references(self):
@@ -752,23 +763,6 @@ class TestDoNotTouchRegression:
                 offenders.append((path, hits))
         assert not offenders, (
             "R-T16.1 violation — do-not-touch files contain digest refs: "
-            f"{offenders}"
-        )
-
-    def test_web_templates_contain_no_digest_references(self):
-        tpl_dir = _SRC / "web" / "templates"
-        offenders: list[tuple[Path, list[str]]] = []
-        for path in tpl_dir.glob("*.html"):
-            text = path.read_text(encoding="utf-8")
-            hits = [
-                line
-                for line in text.splitlines()
-                if "digest" in line.lower()
-            ]
-            if hits:
-                offenders.append((path, hits))
-        assert not offenders, (
-            "R-T16.1 violation — templates contain digest refs: "
             f"{offenders}"
         )
 
@@ -856,7 +850,7 @@ class TestNoSchedulingCodeIntroduced:
 
 
 # ---------------------------------------------------------------------------
-# Additional invariants — INV-1 candidate definition, INV-7 path confinement.
+# Additional invariants — INV-1 candidate definition, DB-only digest output.
 # ---------------------------------------------------------------------------
 
 
@@ -931,23 +925,37 @@ class TestCandidateDefinitionINV1:
         assert stamped[5] != result["digest_id"]
 
 
-class TestPathConfinementINV7:
-    """INV-7 / R-T18.1 / R-U4.3 — output path confined under digests/."""
+class TestDatabaseOnlyDigestOutput:
+    """Digest runs persist DB rows and do not write markdown files."""
 
-    async def test_dispatch_writes_under_digests_path_only(
+    async def test_run_digest_stores_structured_rows_without_markdown_file(
         self, vault, stub_runner
     ):
-        _seed_lensed_items(vault, item_lens_pairs=[(1, "ai")])
+        _seed_lensed_items(
+            vault,
+            item_lens_pairs=[(1, "ai"), (2, "ai"), (3, "rust")],
+        )
         result = await run_digest(vault)
         assert result["ok"] is True
-        path = Path(result["path"])
-        assert path.is_absolute()
-        assert path.is_relative_to(vault.digests_path.resolve())
-        # No subdir nesting under digests/ — parent must BE digests/.
-        assert path.parent.resolve() == vault.digests_path.resolve()
-        # Filename matches YYYYMMDD-HHMMSS.md.
-        import re
-        assert re.fullmatch(r"\d{8}-\d{6}\.md", path.name)
+        assert result["path"] is None
+
+        row = _digest_row(vault, int(result["digest_id"]))
+        assert row["output_path"] == ""
+        assert row["title"]
+        assert row["item_count"] == 3
+
+        section_items = _digest_section_item_rows(vault, int(result["digest_id"]))
+        assert [
+            (r["section_index"], r["lens_id"], r["raw_item_id"], r["sort_order"])
+            for r in section_items
+        ] == [
+            (0, "ai", 1, 0),
+            (0, "ai", 2, 1),
+            (1, "rust", 3, 0),
+        ]
+
+        if vault.digests_path.exists():
+            assert list(vault.digests_path.glob("*.md")) == []
 
 
 # ---------------------------------------------------------------------------

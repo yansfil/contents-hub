@@ -1091,7 +1091,7 @@ def test_v8_database_migrates_to_exploration_schema(tmp_path):
     migrated = init_db(cfg)
     try:
         assert (
-            migrated.execute("SELECT version FROM schema_version").fetchone()[0] == 12
+            migrated.execute("SELECT version FROM schema_version").fetchone()[0] == 13
         )
         tables = {
             row[0]

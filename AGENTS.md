@@ -156,6 +156,8 @@ FastAPI + Jinja2. Routes:
 - `GET /subscriptions`, `POST /subscriptions/add`, `POST /subscriptions/classify` (live-classify URL)
 - `GET /subscriptions/{id}` — detail (recipe, schedule, history, raw items)
 - `POST /subscriptions/{id}/collect|relearn|schedule|delete|open_login|confirm_auth`
+- `GET /digests`, `GET /digests/{id}` — DB-backed digest list/detail
+- `GET /saved`, `POST /raw-items/{id}/toggle-saved` — DB-only saved raw items
 
 The "fetch now" and "relearn" buttons both go through the same `BrowserFetcher` the daemon uses — single source of truth.
 

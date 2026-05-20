@@ -180,6 +180,11 @@ Launch the dashboard:
 contents-hub web --port 8585
 ```
 
+The dashboard includes:
+
+- `/digests` — latest-first digest list and detail view, backed by the DB.
+- `/saved` — raw items explicitly saved from digest article links.
+
 Produce a digest:
 
 ```bash
@@ -188,6 +193,10 @@ contents-hub digest
 
 Digest is a one-shot command. The daemon/fetch loop collects raw items; digest
 scheduling is separate unless another scheduler invokes `contents-hub digest`.
+Successful digest runs persist the digest body, title, section/item mapping,
+and raw item stamps in SQLite. They do not write a markdown file under
+`<vault>/digests/`; the CLI returns `path: null`, and the web dashboard reads
+the structured DB rows.
 
 Register an exploration from a natural-language request and approved recipe:
 

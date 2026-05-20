@@ -68,9 +68,12 @@ contents-hub daemon status
 ```
 
 daemon은 fetch만 반복한다. digest는 현재 독립 one-shot 명령이라 별도 스케줄러에서 호출해야 한다.
+성공한 digest는 SQLite에 저장되며, 웹 대시보드의 `/digests`에서 최신순으로 볼 수 있다.
+개별 원문 저장은 `/saved` 탭에서 확인한다.
 
 ```bash
 contents-hub digest
+contents-hub web --port 8585
 ```
 
 ## 5. Agent skill 설치 (Claude · Codex · Hermes)
