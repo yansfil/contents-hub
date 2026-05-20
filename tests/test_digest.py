@@ -105,8 +105,8 @@ def _seed_lensed_items(
         lenses: explicit lens ids to insert. Defaults to the unique set
             derived from ``item_lens_pairs``.
         extra_no_lens_ids: raw_item ids inserted with status='raw' but NO
-            row in raw_item_lenses. Digest includes these in the synthetic
-            Unmatched section. The fixture also inserts a subscription #1.
+            row in raw_item_lenses. Digest excludes these from candidates.
+            The fixture also inserts a subscription #1.
     """
     now = _now()
     raw_ids = {rid for rid, _ in item_lens_pairs}
@@ -888,7 +888,7 @@ class TestCandidateDefinitionINV1:
                     # excluded by status filter (R-B3.1)
                     (2, "u2", "promoted", "b", "promoted", 1, "", now, now),
                     (3, "u3", "archived", "b", "archived", 1, "", now, now),
-                    # included by digest as Unmatched — no raw_item_lenses row
+                    # excluded by digest — no raw_item_lenses row
                     (4, "u4", "nolens", "b", "raw", 1, "", now, now),
                     # excluded by R-B3.3 — already stamped
                     (5, "u5", "stamped", "b", "raw", 1, "", now, now),
@@ -919,13 +919,13 @@ class TestCandidateDefinitionINV1:
 
         result = await run_digest(vault)
         assert result["ok"] is True
-        # Item 1 is lens-matched; item 4 is carried as Unmatched.
-        assert result["item_count"] == 2
+        # Only item 1 is lens-matched and unstamped.
+        assert result["item_count"] == 1
         stamped = _digest_ids(vault, [1, 2, 3, 4, 5])
         assert stamped[1] == result["digest_id"]
         assert stamped[2] is None
         assert stamped[3] is None
-        assert stamped[4] == result["digest_id"]
+        assert stamped[4] is None
         # Item 5 still carries its original (fake) stamp — NOT the new one.
         assert stamped[5] == existing_digest_id
         assert stamped[5] != result["digest_id"]
