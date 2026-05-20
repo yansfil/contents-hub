@@ -147,6 +147,96 @@ def test_cli_sub_add_accepts_source_type_override_alias(tmp_path, capsys):
     assert payload["title"] == "Karpathy X"
 
 
+def test_rss_list_uses_direct_feed_parser_without_agent(monkeypatch):
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://example.com/feed.xml",
+            "source_type": "rss.feed",
+            "config": {},
+        },
+    )()
+
+    async def fake_fetch(url: str) -> dict:
+        assert url == "https://example.com/feed.xml"
+        return {
+            "ok": True,
+            "body": """
+            <feed xmlns=\"http://www.w3.org/2005/Atom\">
+              <title>Example Feed</title>
+              <entry>
+                <title>Post 1</title>
+                <link href=\"https://example.com/post-1\" />
+                <updated>2026-05-20T09:00:00+09:00</updated>
+                <summary>Summary 1</summary>
+              </entry>
+            </feed>
+            """,
+        }
+
+    runner = _StubRunner("{}")
+    monkeypatch.setattr("contents_hub.executor._fetch_json_url", fake_fetch)
+
+    result = asyncio.run(list_items(sub, runner=runner))  # type: ignore[arg-type]
+
+    assert result.ok is True
+    assert [item.url for item in result.items] == ["https://example.com/post-1"]
+    assert result.items[0].title_hint == "Post 1"
+    assert result.items[0].card_text == "Summary 1"
+    assert result.items[0].source_payload["feed_item"]["title"] == "Post 1"
+    assert runner.prompts == []
+
+
+def test_rss_content_uses_feed_entry_without_agent():
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://example.com/feed.xml",
+            "source_type": "rss.feed",
+            "config": {},
+        },
+    )()
+    runner = _StubRunner("{}")
+
+    result = asyncio.run(
+        content_items(
+            sub,
+            [
+                ListItem(
+                    item_key="https://example.com/post-1",
+                    url="https://example.com/post-1",
+                    title_hint="Post 1",
+                    published_hint="2026-05-20T09:00:00+09:00",
+                    card_text="Summary 1",
+                    source_payload={
+                        "feed_item": {
+                            "url": "https://example.com/post-1",
+                            "title": "Post 1",
+                            "summary": "Summary 1",
+                            "author": "Author",
+                            "published_at": "2026-05-20T09:00:00+09:00",
+                            "content_html": "<p>Body 1</p>",
+                            "tags": ["tag-a"],
+                        }
+                    },
+                )
+            ],
+            runner=runner,
+        )
+    )
+
+    assert result.ok is True
+    assert result.items[0].title == "Post 1"
+    assert result.items[0].summary == "Summary 1"
+    assert result.items[0].author == "Author"
+    assert result.items[0].content_html == "<p>Body 1</p>"
+    assert result.items[0].tags == ["tag-a"]
+    assert result.items[0].extra["body_status"] == "feed_entry"
+    assert runner.prompts == []
+
+
 def test_youtube_list_uses_videos_page_fallback_without_agent(monkeypatch):
     sub = type(
         "S",
