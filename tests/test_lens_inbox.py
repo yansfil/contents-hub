@@ -61,7 +61,7 @@ def _seed_inbox_corpus(cfg) -> None:
         2 raw, sub=1, lenses=[rust]
         3 promoted, sub=2, lenses=[ai]
         4 archived, sub=1, lenses=[rust]
-        5 raw, sub=2, no lens metadata    — must NOT appear as candidate
+        5 raw, sub=2, no lens metadata    — hidden by default; digest may include
         6 raw, sub=1, lenses=[ai] with malformed bullets_json
     """
     now = _now()
@@ -286,6 +286,21 @@ class TestQueryLensInbox:
         assert ids == [1, 2, 6]
         assert view["candidate_count"] == 3
         assert view["is_empty"] is False
+
+    def test_digest_scope_can_include_unmatched_raw_items(self, vault):
+        _seed_inbox_corpus(vault)
+        with get_db(vault) as conn:
+            view = query_lens_inbox(
+                conn,
+                sources_dirname="sources",
+                include_unmatched=True,
+            )
+        ids = [c.id for c in view["candidates"]]
+        # item 5 has no raw_item_lenses row, but digest needs to carry it.
+        assert ids == [5, 1, 2, 6]
+        item5 = view["candidates"][0]
+        assert item5.lenses == ()
+        assert item5.representative.id == ""
 
     def test_default_dedups_multi_lens_into_single_candidate(self, vault):
         _seed_inbox_corpus(vault)

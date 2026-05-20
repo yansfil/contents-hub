@@ -105,8 +105,8 @@ def _seed_lensed_items(
         lenses: explicit lens ids to insert. Defaults to the unique set
             derived from ``item_lens_pairs``.
         extra_no_lens_ids: raw_item ids inserted with status='raw' but NO
-            row in raw_item_lenses (must NEVER appear as digest candidates
-            per R-B3.2). The fixture also inserts a subscription #1.
+            row in raw_item_lenses. Digest includes these in the synthetic
+            Unmatched section. The fixture also inserts a subscription #1.
     """
     now = _now()
     raw_ids = {rid for rid, _ in item_lens_pairs}
@@ -174,6 +174,15 @@ def _digest_ids(cfg: WikiConfig, ids: list[int]) -> dict[int, int | None]:
 def _digest_row_count(cfg: WikiConfig) -> int:
     with get_db(cfg) as conn:
         return conn.execute("SELECT COUNT(*) AS c FROM digests").fetchone()["c"]
+
+
+def _digest_content(cfg: WikiConfig, digest_id: int) -> str:
+    with get_db(cfg) as conn:
+        row = conn.execute(
+            "SELECT content_md FROM digests WHERE id = ?",
+            (digest_id,),
+        ).fetchone()
+    return "" if row is None else row["content_md"]
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +310,7 @@ class TestLensZeroUnmatchedGroup:
         assert len(stub_runner.calls) == 2
         for call in stub_runner.calls:
             assert call["max_turns"] == 5
-            assert call["timeout"] == 120
+            assert call["timeout"] == 60
 
     def test_single_lens_cli_exit_zero(self, vault, stub_runner, tmp_path):
         """R-U5.2 CLI surface — exit 0 in single-group case."""
@@ -346,7 +355,7 @@ class TestTwoPassLLMCallCount:
         # INV-4 exact LLM parameter contract on every call.
         for call in stub_runner.calls:
             assert call["max_turns"] == 5
-            assert call["timeout"] == 120
+            assert call["timeout"] == 60
 
 
 class TestIdempotencyTransaction:
@@ -451,6 +460,161 @@ class TestJSONStdoutShape:
         }
 
 
+class TestLegacyStyleBriefingFormat:
+    """The assembled note should match the Nudget-style briefing shape."""
+
+    async def test_digest_content_starts_with_highlights_and_lens_sections(
+        self, vault
+    ):
+        now = _now()
+        enriched = {
+            "shortTitle": "2인으로 $2M ARR 달성한 AI",
+            "oneLiner": "두 명의 창업자가 AI 에이전트로 연 200만 달러 ARR을 달성했다.",
+            "keyPoints": [
+                "AI 에이전트가 필요한 도구를 직접 만들며 업무를 확장한다.",
+                "풍부한 비즈니스 컨텍스트가 결과 품질을 좌우한다.",
+            ],
+            "details": [
+                "Answer This는 단 2명의 팀으로 연 200만 달러 ARR을 만들었다.",
+                "Skyvern은 고객 통화, 이메일, 슬랙 등 내부 맥락을 에이전트에게 제공했다.",
+            ],
+            "quotes": [
+                {
+                    "text": "에이전트가 저품질 결과물을 만드는 이유는 컨텍스트가 없기 때문입니다.",
+                    "speaker": "Sachin",
+                }
+            ],
+            "entities": [{"name": "Skyvern", "type": "company"}],
+            "narrativeHook": "AI 창업의 차별점은 모델보다 컨텍스트 운영 체계다.",
+        }
+        with get_db(vault) as conn:
+            conn.execute(
+                "INSERT INTO subscriptions (id,url,title,created_at,updated_at)"
+                " VALUES (?,?,?,?,?)",
+                (1, "https://yc.example/", "YC Root Access", now, now),
+            )
+            conn.execute(
+                "INSERT INTO lenses (id,name,description,created_at,updated_at)"
+                " VALUES (?,?,?,?,?)",
+                (
+                    "ai-business",
+                    "현재 AI 시대에 어떤 창업을 해야할지. 비즈니스적 관점에서 제시",
+                    "AI 창업 전략과 비즈니스 관점",
+                    now,
+                    now,
+                ),
+            )
+            conn.executemany(
+                "INSERT INTO raw_items"
+                " (id,url,title,body,status,subscription_id,content_summary,"
+                "collected_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        1,
+                        "https://yc.example/answer-this",
+                        "2인으로 $2M ARR 달성한 AI",
+                        "AI 에이전트 창업 사례",
+                        "raw",
+                        1,
+                        "두 명의 창업자가 AI 에이전트로 ARR을 만들었다.",
+                        now,
+                        now,
+                    ),
+                    (
+                        2,
+                        "https://yc.example/context",
+                        "AI 에이전트 성공의 핵심: 컨텍스트",
+                        "컨텍스트가 없으면 에이전트 결과가 낮아진다.",
+                        "raw",
+                        1,
+                        "AI에게 비즈니스 맥락을 제공해야 한다.",
+                        now,
+                        now,
+                    ),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO raw_item_lenses"
+                " (raw_item_id,lens_id,summary,bullets_json,enriched_json)"
+                " VALUES (?,?,?,?,?)",
+                [
+                    (
+                        1,
+                        "ai-business",
+                        enriched["oneLiner"],
+                        json.dumps(enriched["keyPoints"], ensure_ascii=False),
+                        json.dumps(enriched, ensure_ascii=False),
+                    ),
+                    (
+                        2,
+                        "ai-business",
+                        "에이전트 성능은 비즈니스 컨텍스트 제공 방식에 달려 있다.",
+                        '["컨텍스트가 없으면 결과 품질이 낮아진다."]',
+                        json.dumps(
+                            {
+                                **enriched,
+                                "shortTitle": "AI 에이전트 성공의 핵심: 컨텍스트",
+                                "oneLiner": "에이전트 성능은 비즈니스 컨텍스트 제공 방식에 달려 있다.",
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ),
+                ],
+            )
+
+        class BriefingRunner(CountingRunner):
+            async def run(self, prompt, *, max_turns=30, timeout=600.0):
+                self.calls.append(
+                    {"prompt": prompt, "max_turns": max_turns, "timeout": timeout}
+                )
+                if "Per-Lens Briefing Narrative Prompt" in prompt:
+                    assert "short_title: 2인으로 $2M ARR 달성한 AI" in prompt
+                    assert "why_it_matters: AI 창업의 차별점" in prompt
+                    return (
+                        "AI가 만드는 '1인 군단', 연 매출 27억의 비밀\n\n"
+                        "AI는 더 이상 단순한 보조 도구가 아닙니다. 핵심은 AI에게 회사의 모든 맥락을 제공하는 것입니다.\n\n"
+                        "- Answer This는 단 2명의 팀으로 연 200만 달러 ARR을 만들었습니다.\n"
+                        "- Skyvern 사례는 내부 데이터 접근 권한이 에이전트 품질을 좌우한다는 점을 보여줍니다.\n\n"
+                        "> \"에이전트가 저품질 결과물을 만드는 이유는 컨텍스트가 없기 때문입니다.\" -- Sachin\n\n"
+                        "📎 관련 아티클\n\n"
+                        "- **[2인으로 $2M ARR 달성한 AI](https://yc.example/answer-this)** via YC Root Access\n"
+                        "  두 명의 창업자가 AI 에이전트로 연 200만 달러 ARR을 달성한 전략.\n"
+                        "- **[AI 에이전트 성공의 핵심: 컨텍스트](https://yc.example/context)** via YC Root Access\n"
+                        "  AI 에이전트 성능을 끌어올리는 비즈니스 컨텍스트 운영 방식."
+                    )
+                assert "Executive Summary Prompt" in prompt
+                assert "topic_count: 1" in prompt
+                assert "item_count: 2" in prompt
+                return (
+                    "📌 오늘의 핵심\n\n"
+                    "AI가 단순한 보조 도구를 넘어 비즈니스 전반을 주도하는 시대가 도래했습니다. "
+                    "\"에이전트가 저품질 결과물을 만드는 이유는 컨텍스트가 없기 때문입니다\"라는 통찰을 중심으로, "
+                    "총 1가지 주제와 2건의 아이템을 전해드립니다."
+                )
+
+        original = get_default_runner()
+        runner = BriefingRunner()
+        set_default_runner(runner)  # type: ignore[arg-type]
+        try:
+            result = await run_digest(vault)
+        finally:
+            set_default_runner(original)
+
+        assert result["ok"] is True
+        content = _digest_content(vault, int(result["digest_id"]))
+        assert content.startswith("📌 오늘의 핵심\n\n")
+        assert "# Digest" not in content
+        assert "## Executive summary" not in content
+        assert (
+            "🎯 현재 AI 시대에 어떤 창업을 해야할지. 비즈니스적 관점에서 제시 "
+            "(focus: AI 창업 전략과 비즈니스 관점) (관심 주제) (2건)"
+        ) in content
+        assert "AI가 만드는 '1인 군단', 연 매출 27억의 비밀" in content
+        assert "📎 관련 아티클" in content
+        assert "[2인으로 $2M ARR 달성한 AI](https://yc.example/answer-this)" in content
+        assert len(runner.calls) == 2
+
+
 class TestNonZeroExitOnLLMFailure:
     """R-U3.2 / R-B6.3 / INV-3 — LLM failure ⇒ exit non-zero AND zero DB mutation."""
 
@@ -502,6 +666,39 @@ class TestNonZeroExitOnLLMFailure:
         assert _digest_row_count(vault) == 0
         stamped = _digest_ids(vault, ids)
         assert all(d is None for d in stamped.values()), stamped
+
+
+class TestTimeoutFallback:
+    async def test_group_and_executive_timeout_fall_back_to_markdown(
+        self, vault
+    ):
+        _seed_lensed_items(vault, item_lens_pairs=[(1, "ai"), (2, "ai")])
+
+        class TimeoutRunner:
+            def __init__(self):
+                self.calls = []
+
+            async def run(self, prompt, *, max_turns=30, timeout=600.0):
+                self.calls.append(
+                    {"prompt": prompt, "max_turns": max_turns, "timeout": timeout}
+                )
+                raise TimeoutError("too slow")
+
+        original = get_default_runner()
+        runner = TimeoutRunner()
+        set_default_runner(runner)  # type: ignore[arg-type]
+        try:
+            result = await run_digest(vault)
+        finally:
+            set_default_runner(original)
+
+        assert result["ok"] is True
+        assert result["item_count"] == 2
+        assert len(runner.calls) == 2
+        assert all(call["timeout"] == 60 for call in runner.calls)
+        content = _digest_content(vault, int(result["digest_id"]))
+        assert "제한 시간" in content
+        assert "📎 관련 아티클" in content
 
 
 # ---------------------------------------------------------------------------
@@ -664,7 +861,7 @@ class TestNoSchedulingCodeIntroduced:
 
 
 class TestCandidateDefinitionINV1:
-    """INV-1 / R-B3.* — candidate filter excludes status!='raw', no-lens, stamped."""
+    """INV-1 / R-B3.* — candidate filter excludes status!='raw' and stamped."""
 
     async def test_only_raw_lensed_unstamped_items_are_candidates(
         self, vault, stub_runner
@@ -691,7 +888,7 @@ class TestCandidateDefinitionINV1:
                     # excluded by status filter (R-B3.1)
                     (2, "u2", "promoted", "b", "promoted", 1, "", now, now),
                     (3, "u3", "archived", "b", "archived", 1, "", now, now),
-                    # excluded by R-B3.2 — no raw_item_lenses row
+                    # included by digest as Unmatched — no raw_item_lenses row
                     (4, "u4", "nolens", "b", "raw", 1, "", now, now),
                     # excluded by R-B3.3 — already stamped
                     (5, "u5", "stamped", "b", "raw", 1, "", now, now),
@@ -722,13 +919,13 @@ class TestCandidateDefinitionINV1:
 
         result = await run_digest(vault)
         assert result["ok"] is True
-        # Only item 1 should be included.
-        assert result["item_count"] == 1
+        # Item 1 is lens-matched; item 4 is carried as Unmatched.
+        assert result["item_count"] == 2
         stamped = _digest_ids(vault, [1, 2, 3, 4, 5])
         assert stamped[1] == result["digest_id"]
         assert stamped[2] is None
         assert stamped[3] is None
-        assert stamped[4] is None
+        assert stamped[4] == result["digest_id"]
         # Item 5 still carries its original (fake) stamp — NOT the new one.
         assert stamped[5] == existing_digest_id
         assert stamped[5] != result["digest_id"]

@@ -244,6 +244,36 @@ async def test_claude_sdk_runner_salvages_json_after_reader_error(monkeypatch):
     assert json.loads(result)["items"][0]["url"] == "https://example.test"
 
 
+async def test_claude_sdk_text_only_runner_skips_tools_and_plugins(monkeypatch):
+    from claude_agent_sdk.types import ResultMessage
+
+    captured = {}
+
+    async def fake_query(*, prompt, options, transport=None):
+        captured["allowed_tools"] = getattr(options, "allowed_tools", None)
+        captured["mcp_servers"] = getattr(options, "mcp_servers", None)
+        captured["plugins"] = getattr(options, "plugins", None)
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="fake",
+            result="ok",
+        )
+
+    monkeypatch.setattr("claude_agent_sdk.query", fake_query)
+
+    runner = ClaudeSDKRunner(text_only=True)
+    result = await runner.run("prompt", timeout=1)
+
+    assert result == "ok"
+    assert captured["allowed_tools"] in (None, [])
+    assert captured["mcp_servers"] in (None, {})
+    assert captured["plugins"] in (None, [])
+
+
 async def test_claude_sdk_runner_includes_stderr_tail_when_no_json(monkeypatch):
     async def fake_query(*, prompt, options, transport=None):
         options.stderr("first diagnostic")
