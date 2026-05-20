@@ -148,16 +148,18 @@ Add a subscription:
 
 ```bash
 contents-hub sub add https://www.youtube.com/@team-attention
+contents-hub sub add https://github.com/anthropics/claude-code/releases
 contents-hub sub add https://x.com/karpathy --type x.profile
 contents-hub sub add https://www.threads.net/@example --type threads.profile
 contents-hub sub add https://example.substack.com --type substack.publication
+contents-hub sub add https://www.a16z.news/t/technology --collection-prompt "Only collect posts under the Technology tag."
 ```
 
 Optional add flags:
 
 - `--title "Display name"`
 - `--type SOURCE_TYPE` or `--source-type SOURCE_TYPE`
-- `--filter-prompt "natural language filter"`
+- `--collection-prompt "natural language guidance for browser-backed collection"`
 
 Remove a subscription:
 

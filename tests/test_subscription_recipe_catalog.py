@@ -49,6 +49,18 @@ def test_classify_returns_canonical_source_type_and_recipe_pin():
     assert info["execution_method"] == "feed"
 
 
+def test_classify_detects_github_releases_and_substack_tag():
+    github = classify("https://github.com/anthropics/claude-code/releases")
+    substack_tag = classify("https://www.a16z.news/t/technology")
+
+    assert github["source_type"] == "github.releases"
+    assert github["recipe_id"] == "github.releases.default"
+    assert github["execution_method"] == "feed"
+    assert substack_tag["source_type"] == "substack.tag"
+    assert substack_tag["recipe_id"] == "substack.tag.default"
+    assert substack_tag["execution_method"] == "api"
+
+
 def test_subscription_add_pins_default_recipe(tmp_path):
     cfg = WikiConfig(vault_path=tmp_path)
     init_db(cfg)
@@ -102,8 +114,8 @@ def test_cli_sub_add_auto_detects_and_pins_recipe(tmp_path, capsys):
             "sub",
             "add",
             "https://www.youtube.com/@openai",
-            "--filter-prompt",
-            "AI only",
+            "--collection-prompt",
+            "Only collect links from the Videos tab.",
         ]
     )
 
@@ -114,14 +126,14 @@ def test_cli_sub_add_auto_detects_and_pins_recipe(tmp_path, capsys):
     assert payload["source_type"] == "youtube.channel"
     assert payload["recipe_id"] == "youtube.channel.default"
     assert payload["fetch_method"] == "feed"
-    assert payload["filter_prompt"] == "AI only"
+    assert payload["collection_prompt"] == "Only collect links from the Videos tab."
 
     cfg = WikiConfig(vault_path=tmp_path)
     sub = SubscriptionStore(cfg).get("https://www.youtube.com/@openai")
     assert sub is not None
     assert sub.status.value == "active"
     assert sub.config["recipe_id"] == "youtube.channel.default"
-    assert sub.config["filter_prompt"] == "AI only"
+    assert sub.config["collection_prompt"] == "Only collect links from the Videos tab."
 
 
 def test_cli_sub_add_accepts_source_type_override_alias(tmp_path, capsys):
@@ -234,6 +246,359 @@ def test_rss_content_uses_feed_entry_without_agent():
     assert result.items[0].content_html == "<p>Body 1</p>"
     assert result.items[0].tags == ["tag-a"]
     assert result.items[0].extra["body_status"] == "feed_entry"
+    assert runner.prompts == []
+
+
+def test_github_releases_list_uses_atom_feed_without_agent(monkeypatch):
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://github.com/anthropics/claude-code/releases",
+            "source_type": "github.releases",
+            "config": {},
+        },
+    )()
+
+    async def fake_fetch(url: str) -> dict:
+        assert url == "https://github.com/anthropics/claude-code/releases.atom"
+        return {
+            "ok": True,
+            "body": """
+            <feed xmlns=\"http://www.w3.org/2005/Atom\">
+              <title>Release notes</title>
+              <entry>
+                <id>tag:v1.0.0</id>
+                <title>v1.0.0</title>
+                <link href=\"https://github.com/anthropics/claude-code/releases/tag/v1.0.0\" />
+                <updated>2026-05-20T00:00:00Z</updated>
+                <summary>Release summary</summary>
+              </entry>
+            </feed>
+            """,
+        }
+
+    runner = _StubRunner("{}")
+    monkeypatch.setattr("contents_hub.executor._fetch_json_url", fake_fetch)
+
+    result = asyncio.run(list_items(sub, runner=runner))  # type: ignore[arg-type]
+
+    assert result.ok is True
+    assert result.source_url == "https://github.com/anthropics/claude-code/releases"
+    assert [item.url for item in result.items] == [
+        "https://github.com/anthropics/claude-code/releases/tag/v1.0.0"
+    ]
+    assert result.items[0].source_payload["feed_url"].endswith("/releases.atom")
+    assert runner.prompts == []
+
+
+def test_github_releases_content_uses_atom_entry_without_agent():
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://github.com/anthropics/claude-code/releases",
+            "source_type": "github.releases",
+            "config": {},
+        },
+    )()
+    runner = _StubRunner("{}")
+
+    result = asyncio.run(
+        content_items(
+            sub,
+            [
+                ListItem(
+                    item_key="tag:v1.0.0",
+                    url="https://github.com/anthropics/claude-code/releases/tag/v1.0.0",
+                    title_hint="v1.0.0",
+                    source_payload={
+                        "feed_item": {
+                            "url": "https://github.com/anthropics/claude-code/releases/tag/v1.0.0",
+                            "title": "v1.0.0",
+                            "summary": "Release summary",
+                            "published_at": "2026-05-20T00:00:00Z",
+                            "content_html": "<p>Release body</p>",
+                        }
+                    },
+                )
+            ],
+            runner=runner,
+        )
+    )
+
+    assert result.ok is True
+    assert result.items[0].source_type == "github.releases"
+    assert result.items[0].title == "v1.0.0"
+    assert result.items[0].content_html == "<p>Release body</p>"
+    assert result.items[0].extra["body_status"] == "feed_entry"
+    assert runner.prompts == []
+
+
+def test_reddit_list_uses_json_listing_without_agent(monkeypatch):
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://www.reddit.com/r/SideProject",
+            "source_type": "reddit.subreddit",
+            "config": {},
+        },
+    )()
+
+    async def fake_fetch(url: str) -> dict:
+        assert url == "https://www.reddit.com/r/SideProject/new.json?limit=50"
+        return {
+            "ok": True,
+            "body": json.dumps(
+                {
+                    "data": {
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "abc123",
+                                    "name": "t3_abc123",
+                                    "title": "Launch day",
+                                    "permalink": "/r/SideProject/comments/abc123/launch_day/",
+                                    "created_utc": 1779286747.0,
+                                    "selftext": "We shipped a tiny product.",
+                                    "url": "https://www.reddit.com/r/SideProject/comments/abc123/launch_day/",
+                                    "author": "maker",
+                                    "subreddit": "SideProject",
+                                    "score": 12,
+                                    "num_comments": 3,
+                                    "link_flair_text": "Showoff",
+                                }
+                            }
+                        ]
+                    }
+                }
+            ),
+        }
+
+    runner = _StubRunner("{}")
+    monkeypatch.setattr("contents_hub.executor._fetch_json_url", fake_fetch)
+
+    result = asyncio.run(list_items(sub, runner=runner))  # type: ignore[arg-type]
+
+    assert result.ok is True
+    assert result.items[0].item_key == "reddit:post:abc123"
+    assert result.items[0].url == "https://www.reddit.com/r/SideProject/comments/abc123/launch_day/"
+    assert result.items[0].title_hint == "Launch day"
+    assert result.items[0].source_payload["reddit_post"]["author"] == "maker"
+    assert runner.prompts == []
+
+
+def test_reddit_content_uses_listing_snapshot_without_agent():
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://www.reddit.com/r/SideProject",
+            "source_type": "reddit.subreddit",
+            "config": {},
+        },
+    )()
+    runner = _StubRunner("{}")
+
+    result = asyncio.run(
+        content_items(
+            sub,
+            [
+                ListItem(
+                    item_key="reddit:post:abc123",
+                    url="https://www.reddit.com/r/SideProject/comments/abc123/launch_day/",
+                    title_hint="Launch day",
+                    published_hint="2026-05-20T00:00:00+00:00",
+                    card_text="We shipped a tiny product.",
+                    source_payload={
+                        "reddit_post": {
+                            "id": "abc123",
+                            "title": "Launch day",
+                            "created_at": "2026-05-20T00:00:00+00:00",
+                            "selftext": "We shipped a tiny product.",
+                            "url": "https://example.com/product",
+                            "author": "maker",
+                            "subreddit": "SideProject",
+                            "score": 12,
+                            "num_comments": 3,
+                            "link_flair_text": "Showoff",
+                        }
+                    },
+                )
+            ],
+            runner=runner,
+        )
+    )
+
+    assert result.ok is True
+    assert result.items[0].title == "Launch day"
+    assert result.items[0].author == "maker"
+    assert result.items[0].tags == ["Showoff"]
+    assert result.items[0].extra["external_url"] == "https://example.com/product"
+    assert result.items[0].extra["body_status"] == "full"
+    assert runner.prompts == []
+
+
+def test_substack_tag_list_uses_archive_api_without_agent(monkeypatch):
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://www.a16z.news/t/technology",
+            "source_type": "substack.tag",
+            "config": {},
+        },
+    )()
+
+    async def fake_fetch(url: str) -> dict:
+        assert url == "https://www.a16z.news/api/v1/archive?sort=new&tag=technology&limit=50"
+        return {
+            "ok": True,
+            "body": json.dumps(
+                [
+                    {
+                        "id": 101,
+                        "title": "Need Series C?",
+                        "subtitle": "AI adoption notes",
+                        "description": "AI adoption notes",
+                        "slug": "need-series-c",
+                        "canonical_url": "https://www.a16z.news/p/need-series-c",
+                        "post_date": "2026-05-19T14:00:52.670Z",
+                        "body_html": "<p>Full post body</p>",
+                        "publishedBylines": [{"name": "Alex Danco"}],
+                        "postTags": [{"name": "Technology", "slug": "technology"}],
+                    }
+                ]
+            ),
+        }
+
+    runner = _StubRunner("{}")
+    monkeypatch.setattr("contents_hub.executor._fetch_json_url", fake_fetch)
+
+    result = asyncio.run(list_items(sub, runner=runner))  # type: ignore[arg-type]
+
+    assert result.ok is True
+    assert result.items[0].item_key == "substack:post:101"
+    assert result.items[0].url == "https://www.a16z.news/p/need-series-c"
+    assert result.items[0].title_hint == "Need Series C?"
+    assert result.items[0].source_payload["substack_post"]["body_html"] == "<p>Full post body</p>"
+    assert runner.prompts == []
+
+
+def test_substack_tag_content_uses_archive_snapshot_without_agent():
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://www.a16z.news/t/technology",
+            "source_type": "substack.tag",
+            "config": {},
+        },
+    )()
+    runner = _StubRunner("{}")
+
+    result = asyncio.run(
+        content_items(
+            sub,
+            [
+                ListItem(
+                    item_key="substack:post:101",
+                    url="https://www.a16z.news/p/need-series-c",
+                    title_hint="Need Series C?",
+                    published_hint="2026-05-19T14:00:52.670Z",
+                    card_text="AI adoption notes",
+                    source_payload={
+                        "substack_post": {
+                            "id": 101,
+                            "title": "Need Series C?",
+                            "subtitle": "AI adoption notes",
+                            "canonical_url": "https://www.a16z.news/p/need-series-c",
+                            "post_date": "2026-05-19T14:00:52.670Z",
+                            "body_html": "<p>Full post body</p>",
+                            "publishedBylines": [{"name": "Alex Danco"}],
+                            "postTags": [{"name": "Technology", "slug": "technology"}],
+                        }
+                    },
+                )
+            ],
+            runner=runner,
+        )
+    )
+
+    assert result.ok is True
+    assert result.items[0].title == "Need Series C?"
+    assert result.items[0].author == "Alex Danco"
+    assert result.items[0].tags == ["Technology"]
+    assert result.items[0].content_html == "<p>Full post body</p>"
+    assert result.items[0].extra["body_status"] == "full"
+    assert "body_html" not in result.items[0].extra["source_payload"]["substack_post"]
+    assert runner.prompts == []
+
+
+def test_webpage_content_uses_fetch_url_parse_html_without_agent(monkeypatch):
+    sub = type(
+        "S",
+        (),
+        {
+            "url": "https://example.com/articles",
+            "source_type": "webpage",
+            "config": {},
+        },
+    )()
+
+    async def fake_fetch_url(url: str, **kwargs) -> str:
+        assert url == "https://example.com/articles/post-1"
+        assert kwargs["mode"] == "raw"
+        return json.dumps(
+            {
+                "ok": True,
+                "status": 200,
+                "url": url,
+                "content_type": "text/html; charset=utf-8",
+                "body": """
+                <html>
+                  <head>
+                    <title>Example Article</title>
+                    <meta property="og:title" content="Example Article">
+                    <meta property="og:description" content="Metadata summary">
+                    <meta property="article:published_time" content="2026-05-20T00:00:00Z">
+                    <meta name="author" content="Example Author">
+                  </head>
+                  <body>
+                    <nav>Navigation</nav>
+                    <article><h1>Example Article</h1><p>Body paragraph one.</p></article>
+                  </body>
+                </html>
+                """,
+                "raw_body_chars": 600,
+            }
+        )
+
+    runner = _StubRunner("{}")
+    monkeypatch.setattr("contents_hub.tools.fetchers.fetch_url", fake_fetch_url)
+
+    result = asyncio.run(
+        content_items(
+            sub,
+            [
+                ListItem(
+                    item_key="post-1",
+                    url="https://example.com/articles/post-1",
+                    title_hint="Post 1",
+                )
+            ],
+            runner=runner,
+        )
+    )
+
+    assert result.ok is True
+    assert result.items[0].title == "Example Article"
+    assert result.items[0].summary == "Metadata summary"
+    assert result.items[0].author == "Example Author"
+    assert "Body paragraph one." in result.items[0].content_html
+    assert result.items[0].extra["body_status"] == "partial"
+    assert result.items[0].extra["detail_fetch_method"] == "fetch_url_parse_html"
     assert runner.prompts == []
 
 
@@ -848,6 +1213,7 @@ def test_fetch_subscription_content_fetches_only_new_list_items(tmp_path):
         url="https://example.com/feed.xml",
         title="Example Feed",
         source_type="rss.feed",
+        config={"collection_prompt": "Only collect launch posts."},
     )
 
     published = datetime(2026, 5, 1, tzinfo=timezone.utc).isoformat()
@@ -901,7 +1267,9 @@ def test_fetch_subscription_content_fetches_only_new_list_items(tmp_path):
     assert len(result.items) == 1
     assert len(runner.prompts) == 2
     assert "LIST_STRATEGY 만" in runner.prompts[0]
+    assert "Only collect launch posts." in runner.prompts[0]
     assert "CONTENT_STRATEGY + METADATA" in runner.prompts[1]
+    assert "Only collect launch posts." in runner.prompts[1]
     assert '"url": "https://example.com/post-1"' in runner.prompts[1]
 
     with sqlite3.connect(cfg.meta_path / "state.db") as conn:
