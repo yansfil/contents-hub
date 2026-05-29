@@ -6,12 +6,12 @@ This file provides guidance to Codex and other coding agents when working with c
 
 - Global CLI installation, vault initialization, and repo-outside usage are documented in `docs/initialization.md`.
 - When changing CLI bootstrap, editable install behavior, `CONTENTS_HUB_VAULT` / legacy `LLM_WIKI_VAULT`, launchd setup, or first-run instructions, update `docs/initialization.md` in the same change.
-- Agent-facing skills live under `skills/`: `contents-hub` for CLI/vault operations and `contents-hub-explore` for recipe-first exploration design. Runtime registration is documented in `install.md`; Codex installs real `SKILL.md` copies, while Claude Code / Hermes can use symlinks. When the CLI surface (`contents-hub --help`, `sub`, `fetch`, `tick`, `daemon`, `digest`, `explore`, `exploration`, `lens`) changes, update `skills/contents-hub/SKILL.md` in the same change. When the exploration design lifecycle changes, update `skills/contents-hub-explore/SKILL.md`.
+- Agent-facing skills live under `skills/`: `contents-hub` for CLI/vault operations and `contents-hub-explore` for recipe-first exploration design. Runtime registration is documented in `install.md`; Codex installs real `SKILL.md` copies, while Claude Code / Hermes can use symlinks. When the CLI surface (`contents-hub --help`, `sub`, `fetch`, `tick`, `daemon`, `digest`, `explore`, `exploration`, `lens`, `raw`) changes, update `skills/contents-hub/SKILL.md` in the same change. When the exploration design lifecycle changes, update `skills/contents-hub-explore/SKILL.md`.
 - Claude Code imports this file through `CLAUDE.md` via `@AGENTS.md`; keep this file as the repo-local source of truth.
 
 ## What this is
 
-A Python tool (`contents_hub`) that collects sources into an Obsidian vault. The legacy `llm_wiki` import path remains as a compatibility shim during the rename window. The user subscribes to RSS/YouTube/Twitter/webpages/LinkedIn; a scheduler daemon polls them on a cron, deduplicates, and stores the raw items. There is a FastAPI web dashboard for subscription management and an opinionated "browser fetcher" that uses the Claude Agent SDK + chromux to scrape sites that don't offer an RSS feed.
+A Python tool (`contents_hub`) that collects sources into an Obsidian vault. The legacy `llm_wiki` import path remains as a compatibility shim during the rename window. The user subscribes to RSS/YouTube/Twitter/webpages/LinkedIn; a scheduler daemon polls them on a cron, deduplicates, and stores the raw items. Users can also enqueue ad-hoc read-later URLs or pasted text directly with `raw add`; URL items enrich body text by static HTTP first and Chromux/browser fallback when needed. There is a FastAPI web dashboard for subscription management and an opinionated "browser fetcher" that uses the Claude Agent SDK + chromux to scrape sites that don't offer an RSS feed.
 
 **Scope note (0.2).** This repo was aggressively simplified — the former LLM "compile" pipeline (source → synthesized wiki page), lens routing, classify/promote, lint, semantic search, and the Claude Code plugin surface (commands/skills/agents) were all removed. The `pre-simplify-backup` branch preserves them if any feature needs to be restored.
 
@@ -38,7 +38,11 @@ No linter is wired up. `.ruff_cache/` exists but no ruff config in `pyproject.to
 
 - `init [path]` — scaffold a new vault (`.contents-hub/`, `sources/`, SQLite schema)
 - `sub {add,remove,list}` — subscription CRUD
+- `raw add <url_or_text>` — ad-hoc read-later/manual queue insertion; URL inputs canonicalize/dedupe and enrich page body automatically
 - `daemon {run,loop,install,uninstall,status}` — background collector; `install` writes a macOS launchd plist (`launchd.py`)
+- `digest` — one-shot DB-backed digest generation from Lens-routed raw items
+- `explore` / `exploration {add,list,run,run-all,delete}` — registered exploration lifecycle
+- `lens {create,list,update,delete}` — Lens definitions and routing
 - `web [--port N]` — launch the FastAPI dashboard
 
 Every subcommand accepts `--vault PATH`. Fallback order: explicit `--vault`, then `$CONTENTS_HUB_VAULT`, then legacy `$LLM_WIKI_VAULT`, then CWD (`config.resolve_vault_path`).
@@ -146,7 +150,7 @@ The subscription's `config.recipe` field is mutated in place when EXPLORE/RELEAR
 
 SQLite at `<vault>/.contents-hub/state.db` for new vaults, with legacy `<vault>/.llm-wiki/state.db` fallback for existing vaults. Schema is defined inline in `src/llm_wiki/db.py` with `SCHEMA_VERSION = 8`. Migration scripts are one-offs in `scripts/`.
 
-Tables used by the surviving code: `subscriptions`, `schedules`, `schedule_runs`, `raw_items`, `fetch_cursors`, `job_runs`. The `lenses` / `raw_item_lenses` tables still exist in the schema (not migrated out) but nothing writes to them anymore.
+Tables used by the surviving code: `subscriptions`, `schedules`, `schedule_runs`, `raw_items`, `fetch_cursors`, `job_runs`, `digests`, `digest_items`, `lenses`, and `raw_item_lenses`. Manual `raw add` writes `origin='manual'`, `subscription_id=NULL`, high-priority raw rows and attaches them to requested Lens ids or the auto-created `manual-inbox` Lens so they are digest candidates.
 
 ## Web UI (`src/llm_wiki/web/`)
 

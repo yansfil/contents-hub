@@ -11,8 +11,11 @@ and agent-skill registration. For day-to-day CLI usage, read
 `skills/contents-hub-explore/SKILL.md`.
 
 contents-hub is a Python CLI and FastAPI dashboard for collecting subscription
-and exploration results into an Obsidian-style vault. Browser-backed fetches and
-explorations use chromux through the app/runtime layer.
+and exploration results into an Obsidian-style vault. Browser-backed fetches and explorations use chromux through the app/runtime layer.
+Ad-hoc read-later intake uses `contents-hub raw add <url_or_text>`: text is
+inserted directly, while URL input is canonicalized, deduped, and enriched by
+static HTTP first with Chromux/browser fallback when static extraction cannot
+produce body text.
 
 ## Agent Install Contract
 
@@ -52,6 +55,8 @@ uv tool install -e "$PWD" --force
 uv tool update-shell
 command -v contents-hub
 contents-hub --help
+contents-hub raw --help
+contents-hub raw add --help
 contents-hub exploration --help
 
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub"

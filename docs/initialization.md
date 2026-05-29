@@ -48,6 +48,7 @@ export CONTENTS_HUB_VAULT="/Users/hoyeonlee/team-attention/llm-wiki"
 ```bash
 contents-hub sub list
 contents-hub sub add https://x.com/karpathy
+contents-hub raw add https://example.com/article
 contents-hub fetch 15
 contents-hub digest
 ```
@@ -68,6 +69,7 @@ contents-hub daemon status
 ```
 
 daemon은 fetch만 반복한다. digest는 현재 독립 one-shot 명령이라 별도 스케줄러에서 호출해야 한다.
+구독이 아닌 읽을거리 URL/텍스트는 `contents-hub raw add ...`로 바로 `raw_items` 큐에 넣을 수 있다. URL은 정규화해 dedupe하고, 기본적으로 정적 HTTP 추출 후 필요하면 Chromux/browser fallback으로 본문을 채운다. `--lens-id`를 생략하면 `manual-inbox` Lens가 자동 생성/부착되어 다음 digest 후보가 된다.
 성공한 digest는 SQLite에 저장되며, 웹 대시보드의 `/digests`에서 최신순으로 볼 수 있다.
 개별 원문 저장은 `/saved` 탭에서 확인한다.
 
@@ -126,4 +128,4 @@ Codex는 copy 설치이므로 skill 내용을 바꾼 뒤 새 Codex 세션에서 
 codex debug prompt-input | rg "contents-hub|contents-hub-explore"
 ```
 
-> CLI 명령어 surface(`contents-hub --help`, `sub`, `fetch`, `fetch-all`, `tick`, `daemon`, `digest`, `explore`, `exploration`, `lens`)가 바뀌면 `skills/contents-hub/SKILL.md`도 같은 변경 안에서 함께 업데이트한다. Exploration 설계/등록 lifecycle이 바뀌면 `skills/contents-hub-explore/SKILL.md`도 함께 업데이트한다.
+> CLI 명령어 surface(`contents-hub --help`, `sub`, `fetch`, `fetch-all`, `tick`, `daemon`, `digest`, `explore`, `exploration`, `lens`, `raw`)가 바뀌면 `skills/contents-hub/SKILL.md`도 같은 변경 안에서 함께 업데이트한다. Exploration 설계/등록 lifecycle이 바뀌면 `skills/contents-hub-explore/SKILL.md`도 함께 업데이트한다.

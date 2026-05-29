@@ -16,11 +16,14 @@ command. Prefer concrete commands over theory.
 
 For exploration design sessions that should interview the user, probe browser
 surfaces directly with chromux, iterate on lessons learned, and produce a final
-`recipe.yaml`, use the Exploration Ownership section below and
-`references/exploration-design-loop.md`.
+`recipe.yaml`, use the Exploration Ownership section below plus
+`references/exploration-design-loop-full.md` (the shorter
+`references/exploration-design-loop.md` is a quick version).
 
 For the user's live cron/vault deployment and post-update audit procedure, see
-`references/local-cron-ops.md`.
+`references/local-cron-ops.md`. When the task is to trace which Hermes profile or
+older bot owns contents-hub settings, skills, cron jobs, or documentation, see
+`references/profile-provenance-audit.md`.
 
 For RSS/feed timeout debugging and the GeekNews direct-parser fast-path lesson,
 see `references/rss-fast-path-debugging.md`.
@@ -34,7 +37,7 @@ items through the run-aware persistence tool. Do not ask the Agent SDK to own
 user interview, strategy negotiation, recipe revision, approval, or lifecycle
 state.
 
-Use `references/exploration-design-loop.md` when the task is specifically to
+Use `references/exploration-design-loop-full.md` when the task is specifically to
 design and prove an exploration workflow through interview, direct chromux
 probes, iterative lessons learned, and a final `recipe.yaml`.
 
@@ -222,10 +225,34 @@ The dashboard includes:
 - `/digests` — latest-first digest list and detail view, backed by the DB.
 - `/saved` — raw items explicitly saved from digest article links.
 
-Produce a digest:
+Produce a digest immediately:
 
 ```bash
-contents-hub digest
+contents-hub --vault /Users/grab/hoyeon/contents-hub digest
+```
+
+When the user asks to get the digest "now", "미리", or "한번 해줘", run the
+`contents-hub digest` command directly. Do not satisfy this by scheduling or
+triggering the daily digest cron unless the user explicitly asks to test the cron
+job itself; a cron run may only enqueue/schedule and will not necessarily return
+the digest body in the current turn. After a manual digest, if the JSON says
+`item_count: 0`, check the latest `digests` rows and lens candidate state before
+saying nothing happened — the requested digest may already have been created by
+a just-triggered scheduler run.
+
+Useful verification/query snippets for the user's active vault:
+
+```bash
+sqlite3 -header -column /Users/grab/.contents-hub/hoyeon-contents-hub/state.db \
+  "select id,title,created_at,item_count from digests order by id desc limit 5;"
+
+python3 - <<'PY'
+import sqlite3
+conn=sqlite3.connect('/Users/grab/.contents-hub/hoyeon-contents-hub/state.db')
+row=conn.execute('select title, content_md from digests order by id desc limit 1').fetchone()
+print('# '+row[0])
+print(row[1])
+PY
 ```
 
 Digest is a one-shot command. The daemon/fetch loop collects raw items; digest
@@ -291,6 +318,17 @@ contents-hub lens update vibe-coding --disable
 contents-hub lens delete vibe-coding
 ```
 
+Manually add ad-hoc reading items without creating a subscription:
+
+```bash
+contents-hub raw add https://example.com/article
+contents-hub raw add https://example.com/article --title "Read later" --summary "Why this matters"
+contents-hub raw add "메모나 붙여넣은 텍스트" --title "Manual note"
+contents-hub raw add https://example.com/article --lens-id vibe-coding
+```
+
+`raw add` writes `origin=manual`, `priority=100`, `subscription_id=NULL` rows into `raw_items`. URL input is canonicalized for dedupe; text input uses a stable `content://manual/<hash>` key. URL input fetches body by default: static HTTP extraction first, then Chromux/browser extraction if static fetch fails or produces no body. Fetch failures return warnings while still inserting the URL item, but the intended happy path is a populated `raw_items.body` for digest quality. When `--lens-id` is omitted, the command auto-creates/attaches the `manual-inbox` Lens so the item is immediately Lens inbox/digest eligible. `--lens-id` is repeatable; if supplied, it attaches only to the requested existing Lens rows.
+
 Lens ids are slugs used by `contents-hub explore --lens-id ...` and
 subscription default Lens settings. Keywords are repeatable; comma-separated
 values are also split.
@@ -339,8 +377,21 @@ force a source type.
 `fetch`, `fetch-all`, `tick`, `daemon run --json`, `sub add`,
 `sub list --format json`, `explore`, lifecycle-changing `exploration`
 commands, and lifecycle-changing `lens` commands are intended to be
-machine-readable JSON on stdout. If debugging failures, inspect logs under the
-resolved metadata directory:
+machine-readable JSON on stdout.
+
+When filtering JSON output in shell, avoid this broken pattern:
+
+```bash
+contents-hub ... --format json | python - <<'PY'
+# script here
+PY
+```
+
+The here-doc becomes Python's stdin, so the piped JSON is lost and the upstream
+CLI may see `BrokenPipeError`. Use `python -c`, write to a temp file, or call the
+CLI from inside Python with `subprocess.check_output()` before `json.loads()`.
+
+If debugging failures, inspect logs under the resolved metadata directory:
 
 ```bash
 tail -n 100 .contents-hub/cli.log

@@ -52,3 +52,5 @@ digests/
 
 # QA evidence artifacts
 .qa-reports/
+# Local scratch files
+tmp/
