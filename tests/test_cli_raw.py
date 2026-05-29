@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import pytest
 
-from contents_hub.cli import main
+from contents_hub.cli import build_parser, main
 from contents_hub.config import WikiConfig
 from contents_hub.db import get_db, init_db
 from contents_hub.lens_inbox import query_lens_inbox
@@ -396,3 +397,34 @@ def test_raw_add_fetch_failures_still_insert(monkeypatch, tmp_path, capsys):
     assert payload["item"]["url"] == "https://example.com/fallback"
     assert payload["item"]["title"] == "https://example.com/fallback"
     assert payload["item"]["body"] == ""
+
+
+def test_raw_add_help_hides_fetch_page_option(capsys):
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["raw", "add", "--help"])
+
+    help_text = capsys.readouterr().out
+    assert exc.value.code == 0
+    assert "--fetch-page" not in help_text
+    assert "HTTP(S) URL or free-form text to add" in help_text
+
+
+def test_raw_add_hidden_fetch_page_flag_remains_backward_compatible(tmp_path, capsys):
+    init_db(WikiConfig(vault_path=tmp_path)).close()
+
+    rc = main([
+        "--vault",
+        str(tmp_path),
+        "raw",
+        "add",
+        "plain text note",
+        "--fetch-page",
+    ])
+    payload = _read_json(capsys)
+
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["warnings"] == []
+    assert payload["item"]["body"] == "plain text note"
