@@ -1,9 +1,9 @@
-"""Unit tests for Lens routing fallback to all enabled lenses.
+"""Unit tests for Lens routing fallback to all enabled automatic-routing lenses.
 
 When an owner (subscription or exploration) has no explicit Lens IDs
-configured, Lens evaluation must fall back to every enabled Lens.  An
-owner with a non-empty explicit list is still pinned to that list.
-Disabled lenses are excluded in either path.
+configured, Lens evaluation must fall back to every enabled automatic-routing
+Lens.  An owner with a non-empty explicit list is still pinned to that list.
+Disabled lenses and the legacy manual-inbox Lens are excluded in fallback paths.
 """
 
 from __future__ import annotations
@@ -117,6 +117,24 @@ def test_subscription_fallback_excludes_disabled_lenses(tmp_path):
     assert [lens.id for lens in lenses] == ["ai"]
 
 
+def test_subscription_fallback_excludes_manual_inbox(tmp_path):
+    cfg = _cfg(tmp_path)
+    _seed_lens(cfg, "ai")
+    _seed_lens(cfg, "manual-inbox")
+
+    store = SubscriptionStore(cfg)
+    sub = store.add(
+        url="https://example.com/feed.xml",
+        title="Defaulting",
+        source_type="rss.feed",
+    )
+
+    with get_db(cfg) as conn:
+        lenses = load_enabled_default_lenses(conn, int(sub.id))
+
+    assert [lens.id for lens in lenses] == ["ai"]
+
+
 def test_subscription_explicit_list_does_not_broaden_when_lenses_are_disabled(tmp_path):
     cfg = _cfg(tmp_path)
     _seed_lens(cfg, "ai")
@@ -192,6 +210,23 @@ def test_exploration_fallback_excludes_disabled_lenses(tmp_path):
     cfg = _cfg(tmp_path)
     _seed_lens(cfg, "ai")
     _seed_lens(cfg, "muted", enabled=False)
+
+    store = ExplorationStore(cfg)
+    exploration = store.create_draft(
+        display_name="Defaulting",
+        original_request="Find anything",
+    )
+
+    with get_db(cfg) as conn:
+        lenses = load_exploration_lenses(conn, exploration.id)
+
+    assert [lens.id for lens in lenses] == ["ai"]
+
+
+def test_exploration_fallback_excludes_manual_inbox(tmp_path):
+    cfg = _cfg(tmp_path)
+    _seed_lens(cfg, "ai")
+    _seed_lens(cfg, "manual-inbox")
 
     store = ExplorationStore(cfg)
     exploration = store.create_draft(

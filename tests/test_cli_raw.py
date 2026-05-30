@@ -73,9 +73,21 @@ def test_raw_add_url_inserts_manual_item_and_dedupes_tracking_params(monkeypatch
         assert row["subscription_id"] is None
 
 
-def test_raw_add_without_lens_uses_manual_inbox_and_is_digest_candidate(monkeypatch, tmp_path, capsys):
+def test_raw_add_without_lens_attaches_enabled_lenses_without_manual_inbox(monkeypatch, tmp_path, capsys):
     cfg = WikiConfig(vault_path=tmp_path)
     init_db(cfg).close()
+    with get_db(cfg) as conn:
+        conn.execute(
+            """INSERT INTO lenses
+               (id, name, description, keywords, enabled, created_at, updated_at)
+               VALUES ('ai-trends', 'AI Trends', '', '[]', 1, 'now', 'now')"""
+        )
+        conn.execute(
+            """INSERT INTO lenses
+               (id, name, description, keywords, enabled, created_at, updated_at)
+               VALUES ('agentic-workflow-updates', 'Agentic Workflow', '', '[]', 1, 'now', 'now')"""
+        )
+        conn.commit()
     monkeypatch.setattr(
         "contents_hub.raw_items.enrich_url",
         lambda url: ({"title": "T", "body": "Digest body", "content_summary": "S"}, [], "static"),
@@ -94,15 +106,17 @@ def test_raw_add_without_lens_uses_manual_inbox_and_is_digest_candidate(monkeypa
 
     assert rc == 0
     assert payload["ok"] is True
-    assert payload["lens_ids"] == ["manual-inbox"]
+    assert payload["lens_ids"] == ["agentic-workflow-updates", "ai-trends"]
     with get_db(cfg) as conn:
-        lens = conn.execute("SELECT id, name FROM lenses WHERE id = 'manual-inbox'").fetchone()
-        assert dict(lens) == {"id": "manual-inbox", "name": "Manual Inbox"}
+        assert conn.execute("SELECT COUNT(*) FROM lenses WHERE id = 'manual-inbox'").fetchone()[0] == 0
         attached = conn.execute(
-            "SELECT lens_id, summary FROM raw_item_lenses WHERE raw_item_id = ?",
+            "SELECT lens_id, summary FROM raw_item_lenses WHERE raw_item_id = ? ORDER BY lens_id",
             (payload["item"]["id"],),
-        ).fetchone()
-        assert dict(attached) == {"lens_id": "manual-inbox", "summary": "Digest me tomorrow"}
+        ).fetchall()
+        assert [dict(row) for row in attached] == [
+            {"lens_id": "agentic-workflow-updates", "summary": "Digest me tomorrow"},
+            {"lens_id": "ai-trends", "summary": "Digest me tomorrow"},
+        ]
         view = query_lens_inbox(
             conn,
             sources_dirname="Sources",

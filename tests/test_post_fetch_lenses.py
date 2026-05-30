@@ -127,7 +127,7 @@ def test_fetch_subscription_records_enabled_default_lens_matches_for_new_items(
         body="Practical notes on artificial intelligence evaluation.",
         lens_response=json.dumps(
             {
-                "items": [
+                "matches": [
                     {
                         "id": 1,
                         "summary": "Machine learning evaluation update.",
@@ -199,7 +199,7 @@ def test_collect_all_due_records_lenses_for_new_items_without_changing_tick_coun
         body="A weekly LLM systems note.",
         lens_response=json.dumps(
             {
-                "items": [
+                "matches": [
                     {
                         "id": 1,
                         "summary": "Weekly LLM systems note.",
@@ -286,6 +286,55 @@ def test_duplicate_fetch_does_not_re_evaluate_existing_raw_item_for_lenses(tmp_p
     assert len(runner.prompts) == 1
     with sqlite3.connect(cfg.meta_path / "state.db") as conn:
         assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
+
+
+def test_keyword_lens_uses_semantic_classifier_not_substring_gate(tmp_path):
+    cfg = _cfg(tmp_path)
+    _seed_lens(
+        cfg,
+        "workflow",
+        name="AI coding workflow",
+        description="Practical AI-assisted coding workflows and agentic development practice",
+        keywords=["AI 코딩"],
+    )
+    store = SubscriptionStore(cfg)
+    sub = store.add(
+        url="https://example.com/feed.xml",
+        title="Example Feed",
+        source_type="rss.feed",
+        lenses=["workflow"],
+    )
+    runner = _fetch_runner_for(
+        title="알고리즘이 판단했는데요: AI 코드 시대의 리뷰",
+        body="개발자가 생성형 모델로 앱을 만들고 검증 루틴을 설계하는 사례를 다룬 글.",
+        lens_response=json.dumps(
+            {
+                "matches": [
+                    {
+                        "id": 1,
+                        "summary": "AI 코드 시대의 개발 검증 흐름을 다룬 글.",
+                        "bullets": ["AI 앱 개발", "검증 루틴", "코드 리뷰 workflow"],
+                    }
+                ]
+            }
+        ),
+    )
+
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        result = asyncio.run(fetch_subscription(cfg, sub.id, max_items=10))
+    finally:
+        set_default_runner(original)
+
+    assert result.ok is True
+    assert len(runner.prompts) == 3
+    assert "keywords" in runner.prompts[-1].lower()
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
+        row = conn.execute(
+            "SELECT lens_id, summary FROM raw_item_lenses"
+        ).fetchone()
+    assert row == ("workflow", "AI 코드 시대의 개발 검증 흐름을 다룬 글.")
 
 
 def test_lens_classifier_failure_does_not_roll_back_raw_fetch_success(tmp_path):

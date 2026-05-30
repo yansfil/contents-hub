@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -86,11 +85,15 @@ class _WorkflowRunner:
                 }
             )
 
-        if "You summarize Lens-matched raw items" in prompt:
+        if "You are evaluating whether raw items match a Lens" in prompt:
             ids = sorted({int(value) for value in re.findall(r'"id":\s*(\d+)', prompt)})
+            if "ai-news" in prompt:
+                ids = ids[:2]
+            elif "vibe-coding" in prompt:
+                ids = ids[2:]
             return json.dumps(
                 {
-                    "items": [
+                    "matches": [
                         {
                             "id": item_id,
                             "summary": f"summary {item_id}",

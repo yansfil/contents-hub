@@ -327,7 +327,7 @@ contents-hub raw add "메모나 붙여넣은 텍스트" --title "Manual note"
 contents-hub raw add https://example.com/article --lens-id vibe-coding
 ```
 
-`raw add` writes `origin=manual`, `priority=100`, `subscription_id=NULL` rows into `raw_items`. URL input is canonicalized for dedupe; text input uses a stable `content://manual/<hash>` key. URL input fetches body by default: static HTTP extraction first, then Chromux/browser extraction if static fetch fails or produces no body. Fetch failures return warnings while still inserting the URL item, but the intended happy path is a populated `raw_items.body` for digest quality. When `--lens-id` is omitted, the command auto-creates/attaches the `manual-inbox` Lens so the item is immediately Lens inbox/digest eligible. `--lens-id` is repeatable; if supplied, it attaches only to the requested existing Lens rows.
+`raw add` writes `origin=manual`, `priority=100`, `subscription_id=NULL` rows into `raw_items`. URL input is canonicalized for dedupe; text input uses a stable `content://manual/<hash>` key. URL input fetches body by default: static HTTP extraction first, then Chromux/browser extraction if static fetch fails or produces no body. Fetch failures return warnings while still inserting the URL item, but the intended happy path is a populated `raw_items.body` for digest quality. When `--lens-id` is omitted, the command attaches the item to all enabled automatic-routing Lens rows and does not auto-create `manual-inbox`. `--lens-id` is repeatable; if supplied, it attaches only to the requested existing Lens rows.
 
 Lens ids are slugs used by `contents-hub explore --lens-id ...` and
 subscription default Lens settings. Keywords are repeatable; comma-separated

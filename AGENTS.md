@@ -150,7 +150,7 @@ The subscription's `config.recipe` field is mutated in place when EXPLORE/RELEAR
 
 SQLite at `<vault>/.contents-hub/state.db` for new vaults, with legacy `<vault>/.llm-wiki/state.db` fallback for existing vaults. Schema is defined inline in `src/llm_wiki/db.py` with `SCHEMA_VERSION = 8`. Migration scripts are one-offs in `scripts/`.
 
-Tables used by the surviving code: `subscriptions`, `schedules`, `schedule_runs`, `raw_items`, `fetch_cursors`, `job_runs`, `digests`, `digest_items`, `lenses`, and `raw_item_lenses`. Manual `raw add` writes `origin='manual'`, `subscription_id=NULL`, high-priority raw rows and attaches them to requested Lens ids or the auto-created `manual-inbox` Lens so they are digest candidates.
+Tables used by the surviving code: `subscriptions`, `schedules`, `schedule_runs`, `raw_items`, `fetch_cursors`, `job_runs`, `digests`, `digest_items`, `lenses`, and `raw_item_lenses`. Manual `raw add` writes `origin='manual'`, `subscription_id=NULL`, high-priority raw rows and attaches them to requested Lens ids or, when omitted, to all enabled automatic-routing Lens rows except the legacy `manual-inbox` Lens so they are digest candidates.
 
 ## Web UI (`src/llm_wiki/web/`)
 
