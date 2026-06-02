@@ -5,6 +5,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Sequence
 
 from contents_hub.api import collect_all_due, fetch_subscription
 from contents_hub.cli import main as cli_main
@@ -17,7 +18,7 @@ from contents_hub.subscriptions import SubscriptionStore
 
 
 class _SequenceRunner:
-    def __init__(self, responses: list[str]):
+    def __init__(self, responses: Sequence[str | BaseException]):
         self.responses = list(responses)
         self.prompts: list[str] = []
 
@@ -25,7 +26,10 @@ class _SequenceRunner:
         self.prompts.append(prompt)
         if not self.responses:
             raise AssertionError("runner called more times than expected")
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
 
 
 def _cfg(tmp_path: Path) -> WikiConfig:
@@ -395,6 +399,58 @@ def test_semantic_lens_ignores_classifier_ids_outside_loaded_raw_items(tmp_path)
     assert len(runner.prompts) == 1
     with sqlite3.connect(cfg.meta_path / "state.db") as conn:
         assert conn.execute("SELECT COUNT(*) FROM raw_item_lenses").fetchone()[0] == 0
+
+
+def test_lens_classifier_timeout_falls_back_to_keyword_match(tmp_path):
+    cfg = _cfg(tmp_path)
+    _seed_lens(
+        cfg,
+        "agentic",
+        name="Agent workflows",
+        description="Practical AI coding and agent workflow updates",
+        keywords=["AI coding", "Claude Code"],
+    )
+    store = SubscriptionStore(cfg)
+    sub = store.add(
+        url="https://example.com/feed.xml",
+        title="Example Feed",
+        source_type="rss.feed",
+        lenses=["agentic"],
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
+        conn.execute(
+            """INSERT INTO raw_items
+               (url, title, body, subscription_id, collected_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                "https://example.com/agent",
+                "Claude Code AI coding workflow",
+                "A practical AI coding workflow note.",
+                int(sub.id),
+                now,
+                now,
+            ),
+        )
+        raw_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+
+    runner = _SequenceRunner([TimeoutError()])
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        inserted = asyncio.run(evaluate_post_fetch_lenses(cfg, int(sub.id), [raw_id]))
+    finally:
+        set_default_runner(original)
+
+    assert inserted == 1
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
+        row = conn.execute(
+            "SELECT lens_id, summary FROM raw_item_lenses WHERE raw_item_id = ?",
+            (raw_id,),
+        ).fetchone()
+    assert row[0] == "agentic"
+    assert "AI coding workflow" in row[1]
 
 
 def test_fetch_cli_stdout_remains_single_json_object(monkeypatch, tmp_path, capsys):
