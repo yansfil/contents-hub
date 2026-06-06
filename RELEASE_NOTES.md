@@ -10,7 +10,8 @@ local-first content inbox.
 - Install the single `contents-hub` skill.
 - Let an agent install the local CLI from this repo.
 - Initialize a vault.
-- Add an RSS feed or manual URL/text item.
+- Add a manual URL/text item for the shortest path, or create a Lens and add an
+  RSS feed.
 - Run `fetch-all`.
 - Run `digest`.
 - Open the dashboard.
@@ -19,7 +20,8 @@ local-first content inbox.
 
 - Single public `contents-hub` skill.
 - Local checkout CLI install with `uv tool install -e`.
-- Runtime-neutral RSS/manual digest path.
+- Runtime-neutral manual digest path with automatic `manual-inbox`.
+- RSS digest path through user-created Lenses.
 - Fixed `contents-hub` browser profile CLI:
   - `contents-hub browser open`
   - `contents-hub browser status`

@@ -9,7 +9,8 @@ The reliable first-success path is:
 1. install the single `contents-hub` skill
 2. let the agent install the local CLI from this repo
 3. initialize a vault
-4. add an RSS feed or manual URL/text item
+4. add a manual URL/text item for the shortest path, or create a Lens and add
+   an RSS feed
 5. run `fetch-all`
 6. run `digest`
 7. open the dashboard
@@ -29,7 +30,8 @@ first-success smoke.
 
 ## Runtime QA
 
-- RSS/manual first-success smoke
+- manual first-success smoke with automatic `manual-inbox`
+- RSS first-success smoke with an explicit Lens
 - dashboard HTTP/browser smoke
 - `contents-hub browser open/status/kill` smoke without third-party login
 - `platform demo` delivery/interaction smoke

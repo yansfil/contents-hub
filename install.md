@@ -12,8 +12,9 @@ the agent to install, initialize, subscribe, fetch, digest, deliver, or handle
 interactions. The skill contains the CLI install and operating playbook, and the
 actual product behavior lives in the `contents-hub` CLI.
 
-The reliable first launch path is RSS/manual content, local digest generation,
-and the dashboard. Browser-backed social sources, explorations, and real
+The reliable first launch path is manual content, local digest generation, and
+the dashboard. RSS feeds are reliable after the user creates at least one Lens
+for matching. Browser-backed social sources, explorations, and real
 Telegram/Slack/Discord bot adapters are optional or follow-up paths.
 
 ## Recommended: Skill-First

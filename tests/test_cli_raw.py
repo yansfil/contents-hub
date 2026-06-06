@@ -127,6 +127,34 @@ def test_raw_add_without_lens_attaches_enabled_lenses_without_manual_inbox(monke
         assert view["candidates"][0].id == payload["item"]["id"]
 
 
+def test_raw_add_without_any_lens_creates_manual_inbox(tmp_path, capsys):
+    cfg = WikiConfig(vault_path=tmp_path)
+    init_db(cfg).close()
+
+    rc = main([
+        "--vault",
+        str(tmp_path),
+        "raw",
+        "add",
+        "Manual first launch note",
+        "--title",
+        "First launch",
+    ])
+    payload = _read_json(capsys)
+
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["lens_ids"] == ["manual-inbox"]
+    with get_db(cfg) as conn:
+        lens = conn.execute("SELECT name, enabled FROM lenses WHERE id = 'manual-inbox'").fetchone()
+        assert dict(lens) == {"name": "Manual Inbox", "enabled": 1}
+        attached = conn.execute(
+            "SELECT lens_id FROM raw_item_lenses WHERE raw_item_id = ?",
+            (payload["item"]["id"],),
+        ).fetchall()
+        assert [row["lens_id"] for row in attached] == ["manual-inbox"]
+
+
 def test_raw_add_text_synthesizes_stable_content_key(tmp_path, capsys):
     cfg = WikiConfig(vault_path=tmp_path)
     init_db(cfg).close()

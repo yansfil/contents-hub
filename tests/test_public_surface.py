@@ -95,8 +95,9 @@ def test_launch_docs_keep_first_success_and_followups_clear():
     launch = (ROOT / "docs" / "launch.md").read_text(encoding="utf-8")
 
     assert "Reliable first-launch path" in readme
-    assert "RSS/manual content" in install
-    assert "RSS and manual URL/text are the reliable first-launch path" in quickstart
+    assert "manual content, local digest generation" in install
+    assert "Manual URL/text is the shortest first-launch path" in quickstart
+    assert "automatic `manual-inbox`" in launch
     assert "does not ship built-in Telegram, Slack, or Discord bot packages" in channels
     assert "platform demo" in launch
     assert "contents-hub-explore" not in readme + install + quickstart + channels + launch

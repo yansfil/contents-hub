@@ -16,7 +16,8 @@ Reliable first-launch path:
 - Install the single `contents-hub` skill.
 - Let the agent install the local CLI from this repo.
 - Initialize a vault.
-- Add RSS feeds or manual URL/text items.
+- Add manual URL/text items for an immediate inbox digest, or create a Lens and
+  add RSS feeds.
 - Run `fetch-all`, `digest`, and the dashboard.
 
 Optional or experimental paths:
@@ -32,8 +33,9 @@ contract.
 
 ## Features
 
-- Subscribe to RSS feeds and add manual URL/text items for the reliable first
-  launch path.
+- Add manual URL/text items for the reliable first launch path, with an
+  automatic `manual-inbox` Lens when no Lens exists yet.
+- Subscribe to RSS feeds and route them through user-created Lenses.
 - Try YouTube, web, and browser/agent-backed sources as optional paths.
 - Add ad-hoc read-later URLs or text with `raw add`.
 - Route raw items through Lenses and produce digest notes.

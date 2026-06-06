@@ -93,20 +93,24 @@ contents-hub --vault "$HOME/other-vault" sub list
 
 ## 4. Add Content
 
-RSS feeds and manual URL/text are the reliable first-launch source paths.
-
-Add a subscription:
-
-```bash
-contents-hub sub add https://example.com/feed.xml --title "Example"
-contents-hub sub list --format json
-```
+Manual URL/text is the shortest first-launch source path. If no Lens exists
+yet, contents-hub creates and attaches a `manual-inbox` Lens automatically so
+manual items can appear in the next digest.
 
 Add ad-hoc read-later content:
 
 ```bash
 contents-hub raw add https://example.com/article --title "Read later"
 contents-hub raw add "A pasted note" --title "Manual note"
+```
+
+For RSS, create at least one Lens first so fetched items can be matched into a
+digest:
+
+```bash
+contents-hub lens create ai --name "AI" --keyword ai
+contents-hub sub add https://example.com/feed.xml --title "Example"
+contents-hub sub list --format json
 ```
 
 URL input is canonicalized and deduped. contents-hub tries static HTTP

@@ -88,7 +88,9 @@ The metadata paths are:
 
 ## Common Commands
 
-Reliable first-launch source paths are RSS feeds and manual URL/text items.
+Manual URL/text is the shortest reliable first-launch path. When no Lens exists,
+`raw add` creates and attaches `manual-inbox` automatically so the item can be
+digested. RSS is reliable after the user creates at least one matching Lens.
 Treat browser-backed social sources and explorations as optional paths that may
 need manual browser sign-in.
 
@@ -189,7 +191,8 @@ contents-hub raw add https://example.com/article --lens-id ai-research
 
 `raw add` writes a manual `raw_items` row. URL input is canonicalized for
 dedupe; text input uses a stable content key. When `--lens-id` is omitted, the
-item attaches to enabled automatic Lenses.
+item attaches to enabled automatic Lenses. If none exist, contents-hub creates
+and attaches `manual-inbox`.
 
 ## Lens Management
 

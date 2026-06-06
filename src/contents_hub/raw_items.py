@@ -288,6 +288,9 @@ def add_manual_raw_item(
                     (DEFAULT_MANUAL_LENS_ID,),
                 ).fetchall()
             ]
+            if not requested_lens_ids:
+                _ensure_default_manual_lens(conn, now=now)
+                requested_lens_ids = [DEFAULT_MANUAL_LENS_ID]
         else:
             found = {
                 row["id"]
