@@ -90,7 +90,7 @@ def test_item_key_content_hash_differs_per_content():
 @pytest.fixture
 def vault(tmp_path):
     cfg = WikiConfig(vault_path=tmp_path)
-    (tmp_path / ".llm-wiki").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".contents-hub").mkdir(parents=True, exist_ok=True)
     init_db(cfg)
     return cfg
 

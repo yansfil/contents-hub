@@ -1,4 +1,4 @@
-"""Allow running as `python -m contents_hub`."""
+"""Allow running contents-hub as `python -m contents_hub`."""
 
 import sys
 

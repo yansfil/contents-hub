@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block heading %}Subscriptions{% endblock %}
+
+{% block content %}
+<form method="post" action="/subscriptions/add" style="background: #fff; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+    <div class="form-group" style="margin-bottom: 12px;">
+        <label for="url">Feed URL</label>
+        <input type="url" id="url" name="url" placeholder="Enter URL to subscribe (YouTube, Twitter/X, LinkedIn, Substack, Medium, Reddit, RSS...)" required autocomplete="off">
+        <div id="classify-feedback" style="margin-top: 8px; min-height: 20px; font-size: 13px; color: #495057;"></div>
+    </div>
+    <div class="form-group" style="margin-bottom: 12px;">
+        <label for="source_type">Source type</label>
+        <select id="source_type" name="source_type" style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-family:inherit;font-size:13px;background:#fff;">
+            <option value="">Auto-detect from URL</option>
+            {% for opt in source_type_options %}
+            <option value="{{ opt.id }}">{{ opt.icon }} {{ opt.label }} · {{ opt.execution_method }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group" style="margin-bottom: 12px;">
+        <label for="collection_prompt">Collection prompt <span style="color:#868e96;font-weight:400;">(optional — guides browser collection)</span></label>
+        <textarea id="collection_prompt" name="collection_prompt" rows="2" placeholder="e.g. only collect links from the Latest posts section; ignore nav, footer, sponsored, and recommended links" style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-family:inherit;font-size:13px;"></textarea>
+        <div style="margin-top:4px;font-size:11px;color:#868e96;">Used as extra guidance when the collector needs chromux/browser extraction.</div>
+    </div>
+    <button type="submit" class="btn btn-primary">Subscribe</button>
+</form>
+
+<script>
+(function () {
+    const urlInput = document.getElementById('url');
+    const typeInput = document.getElementById('source_type');
+    const feedback = document.getElementById('classify-feedback');
+    let timer = null;
+    let seq = 0;
+
+    async function classify(url, mySeq) {
+        try {
+            const body = new URLSearchParams({ url, source_type: typeInput.value || '' });
+            const resp = await fetch('/subscriptions/classify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body,
+            });
+            if (!resp.ok) throw new Error('bad response');
+            const info = await resp.json();
+            if (mySeq !== seq) return;
+            const rssHint = info.has_rss_hint ? ' · RSS hint' : '';
+            const title = info.suggested_title ? ` — <span style="color:#868e96;">${info.suggested_title}</span>` : '';
+            const recipe = info.recipe_id ? ` · ${info.recipe_id}@v${info.recipe_version}` : '';
+            feedback.innerHTML = `<span style="color:#2b8a3e;">✓ Detected as ${info.icon} ${info.label}${rssHint}${recipe}</span>${title}`;
+        } catch (e) {
+            if (mySeq !== seq) return;
+            feedback.innerHTML = '<span style="color:#868e96;">Could not detect</span>';
+        }
+    }
+
+    urlInput.addEventListener('input', () => {
+        const url = urlInput.value.trim();
+        if (timer) clearTimeout(timer);
+        if (!url || !/^https?:\/\//.test(url)) {
+            feedback.textContent = '';
+            return;
+        }
+        const mySeq = ++seq;
+        feedback.innerHTML = '<span style="color:#868e96;">Detecting…</span>';
+        timer = setTimeout(() => classify(url, mySeq), 300);
+    });
+    typeInput.addEventListener('change', () => {
+        const url = urlInput.value.trim();
+        if (url && /^https?:\/\//.test(url)) {
+            const mySeq = ++seq;
+            classify(url, mySeq);
+        }
+    });
+})();
+</script>
+
+<h2 style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">All Subscriptions ({{ subscriptions|length }})</h2>
+
+{% if decorated %}
+<div style="display:flex;flex-direction:column;gap:10px;">
+{% for row in decorated %}
+{% set sub = row.obj %}
+{% set status_str = sub.status.value if sub.status is not string else sub.status %}
+<a href="/subscriptions/{{ sub.id }}" style="text-decoration:none;color:inherit;display:block;">
+<div class="sub-card" style="background:#fff;border:1px solid {% if status_str == 'error' %}#ffc9c9{% else %}#e9ecef{% endif %};border-radius:8px;padding:14px 18px;display:flex;align-items:center;gap:14px;transition:border-color .15s, box-shadow .15s;">
+    <div style="font-size:22px;line-height:1;">{{ row.icon }}</div>
+    <div style="flex:1;min-width:0;">
+        <div style="font-size:15px;font-weight:600;color:#1a1a2e;margin-bottom:2px;">{{ sub.title or "(untitled)" }}</div>
+        <div style="font-size:13px;color:#868e96;">
+            {{ row.source_label }}
+            {% if row.fetch_method == "feed" %} · Feed
+            {% elif row.fetch_method == "api" %} · API
+            {% elif row.fetch_method == "browser" %} · Browser
+            {% endif %}
+            {% if sub.last_fetched_at %} · Last fetched {{ sub.last_fetched_at.strftime('%Y-%m-%d') if sub.last_fetched_at.strftime is defined else (sub.last_fetched_at|string)[:10] }}
+            {% else %} · Never fetched
+            {% endif %}
+        </div>
+    </div>
+    <div>
+        {% if status_str == "active" %}
+            <span style="background:#d3f9d8;color:#2b8a3e;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;">Active</span>
+        {% elif status_str == "paused" %}
+            <span style="background:#fff3bf;color:#8a6d3b;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;">Paused</span>
+        {% elif status_str == "error" %}
+            <span style="background:#ffe3e3;color:#c92a2a;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;">Error</span>
+        {% elif status_str == "validating" %}
+            <span style="background:#fff4e6;color:#d9480f;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;">⏳ Validating</span>
+        {% else %}
+            <span style="background:#f1f3f5;color:#495057;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;">{{ status_str }}</span>
+        {% endif %}
+    </div>
+    {% if status_str != "validating" %}
+    <form method="post" action="/subscriptions/{{ sub.id }}/delete" style="margin:0;" onclick="event.stopPropagation();">
+        <button type="submit" class="btn btn-danger btn-sm" onclick="event.stopPropagation();return confirm('Delete this subscription?')">Delete</button>
+    </form>
+    {% endif %}
+</div>
+</a>
+{% endfor %}
+</div>
+<style>
+  .sub-card:hover { border-color:#4263eb !important; box-shadow: 0 0 0 3px rgba(66,99,235,0.08); }
+</style>
+{% else %}
+<p style="color: #868e96;">No subscriptions yet. Add one above.</p>
+{% endif %}
+{% endblock %}

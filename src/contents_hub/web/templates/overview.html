@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block heading %}Home{% endblock %}
+
+{% block content %}
+<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px;">
+    <a href="/subscriptions" style="text-decoration:none;color:inherit;">
+    <div style="background: #fff; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;">
+        <div style="font-size: 13px; color: #868e96; font-weight: 500; margin-bottom: 4px;">Subscriptions</div>
+        <div style="font-size: 28px; font-weight: 700; color: #1a1a2e;">{{ subscription_count }}</div>
+    </div>
+    </a>
+    <div style="background: #fff; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px;" title="Items saved to the wiki in the last 7 days">
+        <div style="font-size: 13px; color: #868e96; font-weight: 500; margin-bottom: 4px;">Saved this week</div>
+        <div style="font-size: 28px; font-weight: 700; color: #1a1a2e;">{{ saved_this_week }}</div>
+    </div>
+</div>
+
+<h2 style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">Recently Saved</h2>
+{% if recent_saved %}
+<table>
+    <thead>
+        <tr>
+            <th>Title</th>
+            <th>URL</th>
+            <th>Saved</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in recent_saved %}
+        <tr>
+            <td>{{ item.title or "(untitled)" }}</td>
+            <td><a href="{{ item.url }}" target="_blank">{{ item.url[:60] }}{% if item.url|length > 60 %}...{% endif %}</a></td>
+            <td>{{ item.saved_at[:10] if item.saved_at else "" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: #868e96;">Nothing saved yet. Add a subscription to start collecting.</p>
+{% endif %}
+{% endblock %}

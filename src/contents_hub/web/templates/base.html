@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block page_title %}{{ title | default("contents-hub") }}{% endblock %} — contents-hub</title>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                         Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans",
+                         "Helvetica Neue", Arial, sans-serif;
+            color: #1a1a2e;
+            background: #f8f9fa;
+            line-height: 1.6;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* ── Sidebar ───────────────────────────────────────────── */
+        .sidebar {
+            width: 220px;
+            background: #ffffff;
+            border-right: 1px solid #e9ecef;
+            padding: 24px 0;
+            flex-shrink: 0;
+        }
+
+        .sidebar-brand {
+            padding: 0 20px 20px;
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a1a2e;
+            letter-spacing: -0.02em;
+        }
+
+        .sidebar-nav {
+            list-style: none;
+        }
+
+        .sidebar-nav a {
+            display: block;
+            padding: 10px 20px;
+            color: #495057;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .sidebar-nav a:hover,
+        .sidebar-nav a.active {
+            background: #f1f3f5;
+            color: #1a1a2e;
+        }
+
+        .sidebar-nav a.active {
+            border-left: 3px solid #4263eb;
+            padding-left: 17px;
+        }
+
+        /* ── Main Content ──────────────────────────────────────── */
+        .main {
+            flex: 1;
+            padding: 32px 40px;
+            max-width: 960px;
+        }
+
+        .page-header {
+            margin-bottom: 24px;
+        }
+
+        .page-header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+
+        /* ── Flash Messages ────────────────────────────────────── */
+        .flash {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .flash-success {
+            background: #d3f9d8;
+            color: #2b8a3e;
+            border: 1px solid #b2f2bb;
+        }
+
+        .flash-error {
+            background: #ffe3e3;
+            color: #c92a2a;
+            border: 1px solid #ffc9c9;
+        }
+
+        /* ── Utilities ─────────────────────────────────────────── */
+        a {
+            color: #4263eb;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 14px;
+        }
+
+        th {
+            font-weight: 600;
+            color: #495057;
+            background: #f8f9fa;
+        }
+
+        button {
+            color: #1a1a2e;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.15s;
+        }
+
+        .btn-primary {
+            background: #4263eb;
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #3b5bdb;
+            text-decoration: none;
+        }
+
+        .btn-danger {
+            background: #fa5252;
+            color: #fff;
+        }
+
+        .btn-danger:hover {
+            background: #e03131;
+            text-decoration: none;
+        }
+
+        .btn-sm {
+            padding: 4px 10px;
+            font-size: 13px;
+        }
+
+        input[type="text"],
+        input[type="url"],
+        input[type="number"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: #fff;
+            color: #1a1a2e;
+            font-family: inherit;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #4263eb;
+            box-shadow: 0 0 0 3px rgba(66, 99, 235, 0.1);
+        }
+
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 4px;
+            color: #495057;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-brand">contents-hub</div>
+        <ul class="sidebar-nav">
+            <li><a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Home</a></li>
+            <li><a href="/subscriptions" class="{% if request.url.path.startswith('/subscriptions') %}active{% endif %}">Subscriptions</a></li>
+            <li><a href="/explorations" class="{% if request.url.path.startswith('/explorations') %}active{% endif %}">Explorations</a></li>
+            <li><a href="/lens-inbox" class="{% if request.url.path.startswith('/lens-inbox') %}active{% endif %}">Lens Inbox</a></li>
+            <li><a href="/digests" class="{% if request.url.path.startswith('/digests') %}active{% endif %}">Digests</a></li>
+            <li><a href="/saved" class="{% if request.url.path.startswith('/saved') %}active{% endif %}">Saved</a></li>
+            <li><a href="/settings" class="{% if request.url.path.startswith('/settings') %}active{% endif %}">Settings</a></li>
+        </ul>
+    </nav>
+
+    <main class="main">
+        <div class="page-header">
+            <h1>{% block heading %}{{ title | default("contents-hub") }}{% endblock %}</h1>
+        </div>
+
+        {% if msg %}
+            <div class="flash flash-success">{{ msg }}</div>
+        {% endif %}
+
+        {% block content %}
+            <p>{{ content | default("") }}</p>
+        {% endblock %}
+    </main>
+</body>
+</html>

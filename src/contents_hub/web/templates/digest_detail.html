@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+
+{% block heading %}Digest{% endblock %}
+
+{% block content %}
+<style>
+    .main {
+        max-width: 1180px;
+        width: 100%;
+    }
+    .digest-topbar {
+        margin-bottom: 18px;
+    }
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: #495057;
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+        margin-bottom: 14px;
+    }
+    .back-link:hover {
+        color: #1a1a2e;
+        text-decoration: none;
+    }
+    .digest-title {
+        color: #1a1a2e;
+        font-size: 28px;
+        font-weight: 750;
+        line-height: 1.25;
+        margin-bottom: 8px;
+    }
+    .digest-meta {
+        color: #868e96;
+        font-size: 13px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .digest-summary {
+        background: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 18px 20px;
+        margin-bottom: 24px;
+    }
+    .digest-section {
+        border-top: 1px solid #dee2e6;
+        padding-top: 22px;
+        margin-top: 24px;
+    }
+    .section-heading {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 8px;
+    }
+    .section-heading h2 {
+        font-size: 20px;
+        line-height: 1.35;
+        color: #1a1a2e;
+        margin: 0;
+    }
+    .section-count {
+        color: #868e96;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+    .section-description {
+        color: #868e96;
+        font-size: 13px;
+        margin-bottom: 14px;
+    }
+    .markdown-body {
+        color: #1a1a2e;
+        font-size: 15px;
+        line-height: 1.72;
+    }
+    .markdown-body p {
+        margin: 0 0 12px;
+    }
+    .markdown-body strong {
+        font-weight: 750;
+    }
+    .markdown-body ul {
+        margin: 0 0 14px 20px;
+        padding: 0;
+    }
+    .markdown-body li {
+        margin-bottom: 5px;
+    }
+    .markdown-body blockquote {
+        border-left: 3px solid #4263eb;
+        color: #495057;
+        margin: 12px 0;
+        padding: 6px 0 6px 12px;
+        background: #f8f9fa;
+    }
+    .markdown-body hr {
+        border: 0;
+        border-top: 1px solid #e9ecef;
+        margin: 18px 0;
+    }
+    .related-title {
+        color: #495057;
+        font-size: 13px;
+        font-weight: 700;
+        margin: 18px 0 10px;
+    }
+    .article-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 10px;
+        list-style: none;
+    }
+    .article-card {
+        background: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 12px 14px;
+        min-width: 0;
+    }
+    .article-card-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: flex-start;
+    }
+    .article-card a {
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.35;
+        word-break: break-word;
+    }
+    .article-meta {
+        color: #868e96;
+        font-size: 12px;
+        margin-top: 4px;
+    }
+    .article-summary {
+        color: #495057;
+        font-size: 13px;
+        line-height: 1.45;
+        margin-top: 7px;
+    }
+    .save-toggle {
+        flex: 0 0 auto;
+        border: 1px solid #ced4da;
+        background: #fff;
+        color: #495057;
+        border-radius: 6px;
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+    }
+    .save-toggle.saved {
+        border-color: #69db7c;
+        background: #ebfbee;
+        color: #2b8a3e;
+    }
+    @media (max-width: 760px) {
+        .digest-title { font-size: 23px; }
+        .section-heading {
+            display: block;
+        }
+        .section-count {
+            display: block;
+            margin-top: 4px;
+        }
+    }
+</style>
+
+<div class="digest-topbar">
+    <a class="back-link" href="/digests">← Digests</a>
+    <h1 class="digest-title">{{ digest.title }}</h1>
+    <div class="digest-meta">
+        <span>{{ digest.created_at[:19].replace("T", " ") if digest.created_at else "" }}</span>
+        <span>{{ digest.item_count }} items</span>
+        <span>{{ digest.sections|length }} sections</span>
+    </div>
+</div>
+
+{% if executive_md %}
+<section class="digest-summary markdown-body">
+    {{ executive_md|markdownish }}
+</section>
+{% endif %}
+
+{% for section in digest.sections %}
+<section class="digest-section">
+    <div class="section-heading">
+        <h2>{{ section.lens_name or section.lens_id }}</h2>
+        <span class="section-count">{{ section.article_items|length }} items</span>
+    </div>
+    {% if section.lens_description %}
+    <div class="section-description">{{ section.lens_description }}</div>
+    {% endif %}
+    {% if section.narrative_web %}
+    <div class="markdown-body">{{ section.narrative_web|markdownish }}</div>
+    {% endif %}
+
+    {% if section.article_items %}
+    <div class="related-title">Related Articles</div>
+    <ul class="article-grid">
+        {% for item in section.article_items %}
+        <li class="article-card">
+            <div class="article-card-head">
+                <div>
+                    <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">
+                        {{ item.title or item.url or "(untitled)" }}
+                    </a>
+                    <div class="article-meta">
+                        {% if item.source_label %}via {{ item.source_label }} - {% endif %}
+                        {{ item.published_at[:10] if item.published_at else item.collected_at[:10] if item.collected_at else "" }}
+                    </div>
+                </div>
+                <form method="post" action="/raw-items/{{ item.id }}/toggle-saved">
+                    <input type="hidden" name="next_url" value="{{ request.url.path }}">
+                    <button type="submit" class="save-toggle {% if item.is_saved %}saved{% endif %}">
+                        {% if item.is_saved %}Saved{% else %}Save{% endif %}
+                    </button>
+                </form>
+            </div>
+            {% if item.content_summary %}
+            <div class="article-summary">
+                {{ item.content_summary[:180] }}{% if item.content_summary|length > 180 %}...{% endif %}
+            </div>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

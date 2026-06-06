@@ -1,0 +1,32 @@
+{# State-specific actions per R-U3.4 / R-U3.3.
+   Buttons carry data-action so T5's JS can wire one delegated handler. #}
+<div class="candidate-actions">
+{% if c.status == "raw" %}
+    <button type="button" class="btn btn-primary btn-sm" data-action="save"
+            data-candidate-id="{{ c.id }}">Save</button>
+    <button type="button" class="btn btn-sm" data-action="archive"
+            data-candidate-id="{{ c.id }}"
+            style="background:#fff;border:1px solid #ced4da;">Archive</button>
+    {% if c.url %}
+    <a href="{{ c.url }}" target="_blank" rel="noopener" class="btn btn-sm"
+       style="background:#fff;border:1px solid #ced4da;color:#495057;">Open original</a>
+    {% endif %}
+{% elif c.status == "archived" %}
+    <button type="button" class="btn btn-sm" data-action="restore"
+            data-candidate-id="{{ c.id }}"
+            style="background:#fff;border:1px solid #ced4da;">Restore to Inbox</button>
+    {% if c.url %}
+    <a href="{{ c.url }}" target="_blank" rel="noopener" class="btn btn-sm"
+       style="background:#fff;border:1px solid #ced4da;color:#495057;">Open original</a>
+    {% endif %}
+{% else %}
+    <span class="badge" style="background:#d3f9d8;color:#2b8a3e;">Saved</span>
+    {% if c.source_note_path %}
+    <span class="candidate-source-note" data-source-note-path>{{ c.source_note_path }}</span>
+    {% endif %}
+    {% if c.url %}
+    <a href="{{ c.url }}" target="_blank" rel="noopener" class="btn btn-sm"
+       style="background:#fff;border:1px solid #ced4da;color:#495057;">Open original</a>
+    {% endif %}
+{% endif %}
+</div>

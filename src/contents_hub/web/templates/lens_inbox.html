@@ -1,0 +1,356 @@
+{% extends "base.html" %}
+
+{% block heading %}Lens Inbox{% endblock %}
+
+{% block content %}
+<style>
+    .lens-inbox-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: flex-end;
+        background: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 16px;
+    }
+    .lens-inbox-toolbar .field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 160px;
+    }
+    .lens-inbox-toolbar .field label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #868e96;
+        margin-bottom: 0;
+    }
+    .lens-inbox-toolbar select {
+        padding: 6px 10px;
+        font-size: 13px;
+    }
+    .view-mode-toggle {
+        display: inline-flex;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        overflow: hidden;
+    }
+    .view-mode-toggle button {
+        background: #fff;
+        border: 0;
+        padding: 6px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        color: #495057;
+    }
+    .view-mode-toggle button.active {
+        background: #4263eb;
+        color: #fff;
+    }
+    .lens-inbox-feedback {
+        font-size: 13px;
+        color: #495057;
+        min-height: 18px;
+        margin: 8px 0 12px;
+    }
+    .lens-inbox-feedback.error { color: #c92a2a; }
+    .lens-inbox-feedback.success { color: #2b8a3e; }
+
+    .candidate-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .candidate-card {
+        background: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 10px;
+        padding: 14px 18px;
+    }
+    .candidate-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+    .candidate-title { font-weight: 600; font-size: 15px; color: #1a1a2e; }
+    .candidate-meta { font-size: 12px; color: #868e96; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .candidate-meta a { color: #1971c2; word-break: break-all; }
+    .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        font-size: 11px;
+        font-weight: 500;
+        border-radius: 10px;
+        background: #e7f5ff;
+        color: #1971c2;
+    }
+    .badge-status { background: #f1f3f5; color: #495057; }
+    .badge-status.raw { background: #e7f5ff; color: #1971c2; }
+    .badge-status.promoted { background: #d3f9d8; color: #2b8a3e; }
+    .badge-status.archived { background: #fff4e6; color: #d9480f; }
+    .candidate-summary {
+        margin-top: 10px;
+        font-size: 14px;
+        color: #1a1a2e;
+        line-height: 1.5;
+    }
+    .candidate-bullets {
+        margin-top: 6px;
+        padding-left: 20px;
+        font-size: 13px;
+        color: #495057;
+    }
+    .candidate-preview {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #868e96;
+        font-style: italic;
+    }
+    .candidate-actions {
+        margin-top: 12px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .candidate-source-note {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #2b8a3e;
+        font-family: ui-monospace, "SFMono-Regular", monospace;
+        background: #f8f9fa;
+        padding: 4px 8px;
+        border-radius: 4px;
+        word-break: break-all;
+    }
+    details.candidate-details { margin-top: 10px; font-size: 13px; }
+    details.candidate-details > summary {
+        cursor: pointer;
+        color: #4263eb;
+        font-size: 12px;
+    }
+    details.candidate-details .lens-block {
+        margin-top: 8px;
+        padding: 8px 10px;
+        border-left: 3px solid #4263eb;
+        background: #f8f9fa;
+        border-radius: 4px;
+    }
+    details.candidate-details .lens-block strong { font-size: 12px; }
+    .lens-group-section {
+        background: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 10px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+    }
+    .lens-group-section h2 {
+        font-size: 16px;
+        margin: 0 0 10px;
+    }
+    .empty-state {
+        background: #fff;
+        border: 1px dashed #dee2e6;
+        border-radius: 10px;
+        padding: 28px;
+        text-align: center;
+        color: #868e96;
+        font-size: 14px;
+    }
+</style>
+
+<div id="lens-inbox"
+     data-default-status="{{ default_status }}"
+     data-default-view="{{ default_view_mode }}">
+    <div class="lens-inbox-toolbar">
+        <div class="field">
+            <label for="li-status">Status</label>
+            <select id="li-status">
+                {% for s in status_options %}
+                <option value="{{ s }}" {% if s == default_status %}selected{% endif %}>
+                    {% if s == "raw" %}Inbox (raw){% elif s == "promoted" %}Saved{% else %}Archived{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label for="li-lens">Lens</label>
+            <select id="li-lens">
+                <option value="">All Lenses</option>
+                {% for lens in lens_options %}
+                <option value="{{ lens.id }}">{{ lens.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label for="li-sub">Subscription</label>
+            <select id="li-sub">
+                <option value="">All subscriptions</option>
+                {% for sub in subscription_options %}
+                <option value="{{ sub.id }}">{{ sub.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label>View</label>
+            <div class="view-mode-toggle" role="group" aria-label="View mode">
+                <button type="button" data-mode="list" class="active">List</button>
+                <button type="button" data-mode="grouped">Lens-grouped</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="li-feedback" class="lens-inbox-feedback" role="status" aria-live="polite"></div>
+
+    <div id="li-region">
+        {% include "_lens_inbox_region.html" %}
+    </div>
+</div>
+
+<script>
+(function () {
+    const root = document.getElementById('lens-inbox');
+    if (!root) return;
+    const region = document.getElementById('li-region');
+    const feedback = document.getElementById('li-feedback');
+    const statusSel = document.getElementById('li-status');
+    const lensSel = document.getElementById('li-lens');
+    const subSel = document.getElementById('li-sub');
+    const modeButtons = root.querySelectorAll('.view-mode-toggle button');
+
+    let state = {
+        status: root.dataset.defaultStatus || 'raw',
+        lens_id: '',
+        subscription_id: '',
+        view_mode: root.dataset.defaultView || 'list',
+    };
+    let inFlight = null;
+
+    function flash(msg, kind) {
+        feedback.textContent = msg || '';
+        feedback.classList.remove('error', 'success');
+        if (kind) feedback.classList.add(kind);
+    }
+
+    function setMode(mode) {
+        state.view_mode = mode;
+        modeButtons.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    }
+
+    async function refresh() {
+        const params = new URLSearchParams();
+        params.set('status', state.status);
+        params.set('view_mode', state.view_mode);
+        if (state.lens_id) params.set('lens_id', state.lens_id);
+        if (state.subscription_id) params.set('subscription_id', state.subscription_id);
+        const token = Symbol('refresh');
+        inFlight = token;
+        flash('Loading…');
+        try {
+            const resp = await fetch('/lens-inbox/data?' + params.toString(), {
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await resp.json();
+            if (inFlight !== token) return;
+            if (!resp.ok || !data.ok) {
+                flash(data.error || ('Refresh failed: ' + resp.status), 'error');
+                return;
+            }
+            region.innerHTML = data.html || '';
+            flash(
+                data.is_empty
+                    ? 'No candidates match the selected filters.'
+                    : data.candidate_count + ' candidate' +
+                      (data.candidate_count === 1 ? '' : 's')
+            );
+        } catch (e) {
+            if (inFlight !== token) return;
+            flash('Network error: ' + e, 'error');
+        }
+    }
+
+    statusSel.addEventListener('change', () => {
+        state.status = statusSel.value;
+        refresh();
+    });
+    lensSel.addEventListener('change', () => {
+        state.lens_id = lensSel.value;
+        refresh();
+    });
+    subSel.addEventListener('change', () => {
+        state.subscription_id = subSel.value;
+        refresh();
+    });
+    modeButtons.forEach(btn => btn.addEventListener('click', () => {
+        setMode(btn.dataset.mode);
+        refresh();
+    }));
+
+    // Delegated action handler — Save / Archive / Restore
+    region.addEventListener('click', async (event) => {
+        const btn = event.target.closest('button[data-action]');
+        if (!btn) return;
+        const action = btn.dataset.action;
+        const itemId = btn.dataset.candidateId;
+        if (!itemId) return;
+
+        const card = btn.closest('.candidate-card');
+        const originalLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = action === 'save' ? 'Saving…'
+                        : action === 'archive' ? 'Archiving…'
+                        : 'Restoring…';
+        flash('');
+
+        const url = `/raw-items/${itemId}/${action}`;
+        let data;
+        try {
+            const resp = await fetch(url, { method: 'POST' });
+            data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.ok) {
+                btn.disabled = false;
+                btn.textContent = originalLabel;
+                flash((data && data.error) || ('Action failed: ' + resp.status), 'error');
+                return;
+            }
+        } catch (e) {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+            flash('Network error: ' + e, 'error');
+            return;
+        }
+
+        // Success: card visually leaves the unresolved list (R-B3.5).
+        // Most filter changes already re-fetch; for inline action feedback
+        // we mutate the card so the change is immediate.
+        if (action === 'save' && data.path) {
+            const actions = card.querySelector('.candidate-actions');
+            if (actions) {
+                actions.innerHTML =
+                    '<span class="badge" style="background:#d3f9d8;color:#2b8a3e;">Saved</span>' +
+                    ' <span class="candidate-source-note" data-source-note-path>' +
+                    data.path + '</span>';
+            }
+            card.dataset.status = 'promoted';
+            flash('Saved → ' + data.path, 'success');
+        } else if (action === 'archive') {
+            if (state.status === 'raw') {
+                card.remove();
+            } else {
+                card.dataset.status = 'archived';
+            }
+            flash('Archived.', 'success');
+        } else if (action === 'restore') {
+            if (state.status === 'archived') {
+                card.remove();
+            } else {
+                card.dataset.status = 'raw';
+            }
+            flash('Restored to Inbox.', 'success');
+        }
+
+        // Empty-state surface: if the visible list is now empty, show it.
+        const remaining = region.querySelectorAll('.candidate-card').length;
+        if (remaining === 0) {
+            region.innerHTML =
+                '<div class="empty-state" data-empty="1">' +
+                'No Lens candidates match the selected filters.</div>';
+        }
+    });
+})();
+</script>
+{% endblock %}

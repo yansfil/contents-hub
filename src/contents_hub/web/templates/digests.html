@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block heading %}Digests{% endblock %}
+
+{% block content %}
+<style>
+    .main {
+        max-width: 1080px;
+        width: 100%;
+    }
+    .digest-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 12px;
+    }
+    .digest-card {
+        display: block;
+        background: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 16px 18px;
+        color: inherit;
+        text-decoration: none;
+        min-height: 132px;
+    }
+    .digest-card:hover {
+        border-color: #adb5bd;
+        box-shadow: 0 3px 10px rgba(26, 26, 46, 0.05);
+        text-decoration: none;
+    }
+    .digest-title {
+        color: #1a1a2e;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.35;
+        margin-bottom: 10px;
+    }
+    .digest-meta {
+        color: #868e96;
+        font-size: 12px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .digest-preview {
+        color: #495057;
+        font-size: 13px;
+        line-height: 1.45;
+        margin-top: 10px;
+    }
+    .empty-state {
+        background: #fff;
+        border: 1px dashed #dee2e6;
+        border-radius: 8px;
+        padding: 28px;
+        color: #868e96;
+        text-align: center;
+    }
+</style>
+
+{% if digests %}
+<div class="digest-grid">
+    {% for digest in digests %}
+    <a class="digest-card" href="/digests/{{ digest.id }}">
+        <div class="digest-title">{{ digest.title }}</div>
+        <div class="digest-meta">
+            <span>{{ digest.created_at[:16].replace("T", " ") if digest.created_at else "" }}</span>
+            <span>{{ digest.item_count }} items</span>
+            <span>{{ digest.section_count }} sections</span>
+        </div>
+        {% if digest.preview %}
+        <div class="digest-preview">
+            {{ digest.preview[:150] }}{% if digest.preview|length > 150 %}...{% endif %}
+        </div>
+        {% endif %}
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">No digests yet.</div>
+{% endif %}
+{% endblock %}

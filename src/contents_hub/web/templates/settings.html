@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div id="settings-feedback" style="display:none;margin-bottom:16px;padding:10px 14px;border-radius:6px;font-size:13px;"></div>
+
+<div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:16px 20px;margin-bottom:20px;">
+    <h3 style="font-size:15px;font-weight:600;margin:0 0 4px;">Browser (contents-hub profile)</h3>
+    <p style="font-size:12px;color:#868e96;margin:0 0 12px;">
+        Open a site in the chromux <code>contents-hub</code> profile so you can sign in
+        or set cookies / preferences. Agent fetches use the same profile, so any
+        login you complete here carries over to scheduled runs.
+    </p>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+        <button type="button" id="btn-launch-only" class="btn btn-primary">
+            Open in Chrome
+        </button>
+        <button type="button" id="btn-resume-background" class="btn btn-sm"
+                style="background:#fff;color:#495057;border:1px solid #ced4da;">
+            Resume background fetches
+        </button>
+    </div>
+    <div style="font-size:12px;color:#868e96;margin-bottom:6px;">
+        Or jump straight to a sign-in page:
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        {% for p in browser_presets %}
+        <button type="button"
+                class="btn btn-sm"
+                style="background:#f1f3f5;color:#1a1a2e;border:1px solid #dee2e6;"
+                data-preset-url="{{ p.url }}">
+            {{ p.label }}
+        </button>
+        {% endfor %}
+    </div>
+</div>
+
+<div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:16px 20px;">
+    <h3 style="font-size:15px;font-weight:600;margin:0 0 4px;">Default schedule</h3>
+    <p style="font-size:12px;color:#868e96;margin:0 0 12px;">
+        How often new subscriptions poll by default. Each subscription's
+        detail page lets you override individually.
+    </p>
+
+    <form method="post" action="/settings/schedule" id="schedule-form">
+        <input type="hidden" name="global_interval" id="global_interval"
+               value="{{ global_interval if global_interval is not none else '' }}">
+        <input type="hidden" name="global_cron" value="">
+
+        <div id="interval-presets" style="display:flex;gap:8px;flex-wrap:wrap;">
+            {% for opt in interval_options %}
+            <button type="button"
+                    class="preset-chip btn btn-sm"
+                    data-value="{{ opt.value }}"
+                    style="border:1px solid #dee2e6;background:#f1f3f5;color:#1a1a2e;">
+                {{ opt.label }}
+            </button>
+            {% endfor %}
+        </div>
+
+        <div style="margin-top:16px;">
+            <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+    </form>
+</div>
+
+<script>
+(function () {
+    const fb = document.getElementById('settings-feedback');
+    function flash(kind, text) {
+        fb.style.display = 'block';
+        fb.textContent = text;
+        if (kind === 'ok') {
+            fb.style.background = '#d3f9d8';
+            fb.style.color = '#2b8a3e';
+            fb.style.border = '1px solid #b2f2bb';
+        } else {
+            fb.style.background = '#ffe3e3';
+            fb.style.color = '#c92a2a';
+            fb.style.border = '1px solid #ffc9c9';
+        }
+    }
+
+    async function postWithConfirm(path, fields) {
+        const build = (confirmed) => {
+            const fd = new FormData();
+            for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+            if (confirmed) fd.append('confirmed', 'true');
+            return fd;
+        };
+        let resp = await fetch(path, { method: 'POST', body: build(false) });
+        if (resp.status === 409) {
+            const data = await resp.json();
+            if (!window.confirm(data.error)) return null;
+            resp = await fetch(path, { method: 'POST', body: build(true) });
+        }
+        return resp.json();
+    }
+
+    async function openUrl(url) {
+        try {
+            const data = await postWithConfirm('/settings/browser/open', { url });
+            if (!data) return;
+            if (data.status === 'opened') flash('ok', 'Opened in Chrome: ' + data.url);
+            else flash('err', 'Error: ' + (data.error || data.status));
+        } catch (e) { flash('err', 'Error: ' + e); }
+    }
+
+    document.querySelectorAll('[data-preset-url]').forEach(btn => {
+        btn.addEventListener('click', () => openUrl(btn.dataset.presetUrl));
+    });
+
+    // Preset chips for the default schedule (single-select).
+    const intervalInput = document.getElementById('global_interval');
+    function syncChipSelection() {
+        const cur = (intervalInput.value || '').trim();
+        document.querySelectorAll('.preset-chip').forEach(ch => {
+            const active = ch.dataset.value === cur;
+            ch.style.background = active ? '#4263eb' : '#f1f3f5';
+            ch.style.color = active ? '#fff' : '#1a1a2e';
+            ch.style.borderColor = active ? '#4263eb' : '#dee2e6';
+        });
+    }
+    document.querySelectorAll('.preset-chip').forEach(ch => {
+        ch.addEventListener('click', () => {
+            intervalInput.value = ch.dataset.value;
+            syncChipSelection();
+        });
+    });
+    syncChipSelection();
+
+    document.getElementById('btn-launch-only').addEventListener('click', async () => {
+        try {
+            const data = await postWithConfirm('/settings/browser/launch', {});
+            if (!data) return;
+            if (data.status === 'launched') flash('ok', 'Chrome launched (contents-hub profile, headed).');
+            else flash('err', 'Error: ' + (data.error || data.status));
+        } catch (e) { flash('err', 'Error: ' + e); }
+    });
+
+    document.getElementById('btn-resume-background').addEventListener('click', async () => {
+        try {
+            const resp = await fetch('/settings/browser/resume-background', { method: 'POST' });
+            const data = await resp.json();
+            if (data.status === 'killed') flash('ok', 'Foreground Chrome closed. Background fetches will resume headed with background tabs.');
+            else if (data.status === 'not_running') flash('ok', 'Chrome is not running. Background fetches are ready.');
+            else flash('err', 'Error: ' + (data.error || data.status));
+        } catch (e) { flash('err', 'Error: ' + e); }
+    });
+
+})();
+</script>
+{% endblock %}

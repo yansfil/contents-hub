@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def vault(tmp_path):
     cfg = WikiConfig(vault_path=tmp_path)
-    (tmp_path / ".llm-wiki").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".contents-hub").mkdir(parents=True, exist_ok=True)
     init_db(cfg)
     return cfg
 
@@ -42,7 +42,7 @@ def vault(tmp_path):
 def test_chromux_profile_state_detects_modes(monkeypatch):
     def fake_run(args, **kwargs):
         if args[-1] == "ps":
-            return SimpleNamespace(stdout="llm-wiki 9222 111\nother 9444 222\n")
+            return SimpleNamespace(stdout="contents-hub 9222 111\nother 9444 222\n")
         if args[:3] == ["ps", "-p", "111"]:
             return SimpleNamespace(stdout="/Applications/Google Chrome --remote-debugging-port=9222")
         raise AssertionError(args)
@@ -59,21 +59,21 @@ def test_chromux_profile_state_detects_modes(monkeypatch):
         "contents_hub.chromux.httpx.get",
         lambda url, timeout: FakeResponse("Mozilla HeadlessChrome/120"),
     )
-    assert chromux_profile_state("llm-wiki") == "headless"
+    assert chromux_profile_state("contents-hub") == "headless"
 
     monkeypatch.setattr(
         "contents_hub.chromux.httpx.get",
         lambda url, timeout: FakeResponse("Mozilla Chrome/120"),
     )
-    assert chromux_profile_state("llm-wiki") == "headed"
+    assert chromux_profile_state("contents-hub") == "headed"
 
-    def fake_legacy_offscreen_run(args, **kwargs):
+    def fake_offscreen_run(args, **kwargs):
         if args[-1] == "ps":
-            return SimpleNamespace(stdout="llm-wiki 9222 333\n")
+            return SimpleNamespace(stdout="contents-hub 9222 333\n")
         raise AssertionError(args)
 
-    monkeypatch.setattr("contents_hub.chromux.subprocess.run", fake_legacy_offscreen_run)
-    assert chromux_profile_state("llm-wiki") == "headed"
+    monkeypatch.setattr("contents_hub.chromux.subprocess.run", fake_offscreen_run)
+    assert chromux_profile_state("contents-hub") == "headed"
 
 
 def test_resolve_chromux_profile_prefers_canonical_when_no_legacy_exists(
@@ -88,24 +88,24 @@ def test_resolve_chromux_profile_prefers_canonical_when_no_legacy_exists(
     assert resolve_chromux_profile() == "contents-hub"
 
 
-def test_resolve_chromux_profile_reuses_existing_legacy_login_profile(
+def test_resolve_chromux_profile_reuses_existing_contents_hub_profile(
     tmp_path, monkeypatch
 ):
-    legacy_profile = tmp_path / "llm-wiki"
-    legacy_profile.mkdir()
+    profile = tmp_path / "contents-hub"
+    profile.mkdir()
     monkeypatch.setenv("CHROMUX_PROFILES_DIR", str(tmp_path))
     monkeypatch.setattr(
         "contents_hub.chromux.subprocess.run",
         lambda *args, **kwargs: SimpleNamespace(stdout=""),
     )
 
-    assert resolve_chromux_profile() == "llm-wiki"
+    assert resolve_chromux_profile() == "contents-hub"
 
 
-def test_resolve_chromux_profile_prefers_running_canonical_over_legacy_dir(
+def test_resolve_chromux_profile_prefers_running_contents_hub_profile(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "llm-wiki").mkdir()
+    (tmp_path / "contents-hub").mkdir()
     monkeypatch.setenv("CHROMUX_PROFILES_DIR", str(tmp_path))
     monkeypatch.setattr(
         "contents_hub.chromux.subprocess.run",
@@ -115,18 +115,17 @@ def test_resolve_chromux_profile_prefers_running_canonical_over_legacy_dir(
     assert resolve_chromux_profile() == "contents-hub"
 
 
-def test_recipe_browser_profile_language_is_canonical_with_legacy_fallback():
+def test_recipe_browser_profile_language_is_canonical_only():
     recipe_files = [
-        *sorted((REPO_ROOT / "src/llm_wiki/recipes/templates").glob("*_prompt.md")),
-        REPO_ROOT / "src/llm_wiki/recipes/seed/linkedin.md",
-        REPO_ROOT / "src/llm_wiki/recipes/seed/twitter.md",
+        *sorted((REPO_ROOT / "src/contents_hub/recipes/templates").glob("*_prompt.md")),
+        REPO_ROOT / "src/contents_hub/recipes/seed/linkedin.md",
+        REPO_ROOT / "src/contents_hub/recipes/seed/twitter.md",
     ]
 
     for path in recipe_files:
         text = path.read_text(encoding="utf-8")
         assert "contents-hub" in text
-        if "llm-wiki" in text:
-            assert "legacy" in text or "fallback" in text
+        assert "profile fallback" not in text.lower()
 
 
 def test_open_chromux_headed_requires_confirm_then_kills_and_opens(monkeypatch):
@@ -136,7 +135,7 @@ def test_open_chromux_headed_requires_confirm_then_kills_and_opens(monkeypatch):
     def fake_run(args, **kwargs):
         run_calls.append(args)
         if args[-1] == "ps":
-            return SimpleNamespace(stdout="llm-wiki 9222\n")
+            return SimpleNamespace(stdout="contents-hub 9222\n")
         return SimpleNamespace(stdout="", returncode=0)
 
     class FakeResponse:
@@ -155,27 +154,27 @@ def test_open_chromux_headed_requires_confirm_then_kills_and_opens(monkeypatch):
     assert "Background browser work" in first["error"]
     assert "headless mode" in first["error"]
     assert "Any active fetch" in first["error"]
-    assert not any(call[-2:] == ["kill", "llm-wiki"] for call in run_calls)
+    assert not any(call[-2:] == ["kill", "contents-hub"] for call in run_calls)
 
     second = open_chromux_headed(
         "https://example.com", session="login-1", confirmed=True
     )
     assert second["status"] == "opened"
-    assert any(call[-2:] == ["kill", "llm-wiki"] for call in run_calls)
+    assert any(call[-2:] == ["kill", "contents-hub"] for call in run_calls)
     assert [call[1:] for call in popen_calls] == [
-        ["launch", "llm-wiki"],
+        ["launch", "contents-hub"],
         ["open", "login-1", "https://example.com"],
     ]
 
 
-def test_open_chromux_headed_treats_legacy_offscreen_as_headed(monkeypatch):
+def test_open_chromux_headed_treats_regular_chrome_as_headed(monkeypatch):
     run_calls: list[list[str]] = []
     popen_calls: list[list[str]] = []
 
     def fake_run(args, **kwargs):
         run_calls.append(args)
         if args[-1] == "ps":
-            return SimpleNamespace(stdout="llm-wiki 9222 333\n")
+            return SimpleNamespace(stdout="contents-hub 9222 333\n")
         return SimpleNamespace(stdout="", returncode=0)
 
     class FakeResponse:
@@ -192,7 +191,7 @@ def test_open_chromux_headed_treats_legacy_offscreen_as_headed(monkeypatch):
     result = open_chromux_headed("https://example.com", session="login-1")
     assert result["status"] == "opened"
     assert result["previous_state"] == "headed"
-    assert not any(call[-2:] == ["kill", "llm-wiki"] for call in run_calls)
+    assert not any(call[-2:] == ["kill", "contents-hub"] for call in run_calls)
     assert [call[1:] for call in popen_calls] == [
         ["open", "login-1", "https://example.com"],
     ]
@@ -203,7 +202,7 @@ def test_open_chromux_headed_reopens_blank_tab_when_already_headed(monkeypatch):
 
     def fake_run(args, **kwargs):
         if args[-1] == "ps":
-            return SimpleNamespace(stdout="llm-wiki 9222\n")
+            return SimpleNamespace(stdout="contents-hub 9222\n")
         return SimpleNamespace(stdout="", returncode=0)
 
     class FakeResponse:
@@ -558,7 +557,7 @@ async def test_exploration_session_allows_foreground_tools_and_closes_run_sessio
         assert started["profile"] == "contents-hub"
         payload = json.loads(
             await chromux_navigate_handler(
-                url="https://threads.net/@hoyeon",
+                url="https://threads.net/@example",
                 session_id="explore-feed",
             )
         )
@@ -566,7 +565,7 @@ async def test_exploration_session_allows_foreground_tools_and_closes_run_sessio
 
     assert prepare_calls == []
     assert calls == [
-        (["chromux", "open", "explore-feed", "https://threads.net/@hoyeon"], "contents-hub")
+        (["chromux", "open", "explore-feed", "https://threads.net/@example"], "contents-hub")
     ]
     assert closed_sessions == ["explore-feed", "explore-run"]
 
@@ -619,10 +618,10 @@ async def test_chromux_browser_tools_match_current_cli_and_session_alias(monkeyp
     assert "[data-urn] a[href]" in calls[2][3]
 
 
-async def test_chromux_browser_tool_env_reuses_legacy_profile_when_only_legacy_exists(
+async def test_chromux_browser_tool_env_uses_contents_hub_profile(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "llm-wiki").mkdir()
+    (tmp_path / "contents-hub").mkdir()
     calls: list[tuple[list[str], str]] = []
 
     def fake_run_chromux(args, *, env=None, timeout):
@@ -646,15 +645,15 @@ async def test_chromux_browser_tool_env_reuses_legacy_profile_when_only_legacy_e
 
     opened = json.loads(
         await chromux_navigate_handler(
-            url="https://www.linkedin.com/feed/", session="exec-linkedin-legacy"
+            url="https://www.linkedin.com/feed/", session="exec-linkedin-canonical"
         )
     )
 
     assert opened["ok"] is True
     assert calls == [
         (
-            ["chromux", "open", "exec-linkedin-legacy", "https://www.linkedin.com/feed/"],
-            "llm-wiki",
+            ["chromux", "open", "exec-linkedin-canonical", "https://www.linkedin.com/feed/"],
+            "contents-hub",
         )
     ]
 

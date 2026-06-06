@@ -1,0 +1,118 @@
+# contents-hub
+
+contents-hub is a local-first content inbox for people who want agents,
+schedulers, and chat channels to feed the same durable knowledge vault.
+
+It stores subscriptions, raw items, Lens matches, digests, outbound delivery
+mappings, and interaction events in SQLite under a vault directory. You can run
+it from plain cron, launchd, Hermes, OpenClaw, Claude Code, Codex, or another
+loop. The runtime owns scheduling and channel transport; contents-hub owns the
+content state and actions.
+
+## Features
+
+- Subscribe to RSS, YouTube, web, and browser/agent-backed sources.
+- Add ad-hoc read-later URLs or text with `raw add`.
+- Route raw items through Lenses and produce digest notes.
+- Promote saved raw items into immutable `sources/*.md` notes.
+- Run a FastAPI dashboard for subscriptions, digests, saved items, and inboxes.
+- Generate adapter-ready delivery payloads with `deliver pending`.
+- Record outbound message ids with `delivery record`.
+- Handle normalized reactions with `interaction handle`.
+- Use Telegram/Hermes as a working reference path and Slack/Discord fixtures as
+  channel contract examples.
+
+## Product Concepts
+
+- **Vault**: a local directory that owns `.contents-hub/`, `sources/`, and
+  generated digest notes, for example `~/contents-vault`.
+- **Subscription**: a source definition with URL, type, schedule, and optional
+  collection guidance, such as an RSS feed or YouTube channel.
+- **Raw item**: an unprocessed collected item in SQLite, such as one article.
+- **Lens**: a routing rule that decides which raw items belong in a topic view
+  or digest, such as `ai-research`.
+- **Digest**: a DB-backed briefing built from Lens-routed raw items.
+- **Exploration**: a registered recipe for agent-assisted recurring research.
+- **Promotion**: turning a raw item into a source note.
+- **Source note**: an immutable Markdown file under `sources/`.
+
+## Install
+
+```bash
+git clone https://github.com/yansfil/contents-hub
+cd contents-hub
+uv sync --all-extras
+uv run contents-hub --help
+```
+
+For an editable CLI:
+
+```bash
+uv tool install -e .
+contents-hub --help
+```
+
+The base install is runtime-neutral. Claude-backed browser/agent features are
+behind the `claude` optional extra:
+
+```bash
+uv sync --extra claude --extra dev
+CONTENTS_HUB_AGENT_RUNNER=claude-sdk contents-hub --help
+```
+
+## Quickstart
+
+```bash
+contents-hub init ~/contents-vault
+contents-hub --vault ~/contents-vault sub add https://example.com/feed.xml --title "Example"
+contents-hub --vault ~/contents-vault sub list --format json
+contents-hub --vault ~/contents-vault raw add https://example.com/story
+contents-hub --vault ~/contents-vault digest
+contents-hub --vault ~/contents-vault web --port 8585
+```
+
+Open `http://localhost:8585` for the dashboard.
+
+## Interaction Flow
+
+1. `contents-hub deliver pending --format json` emits item or digest cards.
+2. A channel adapter sends the card to Telegram, Slack, Discord, or another
+   surface.
+3. The adapter calls `contents-hub delivery record` with the returned message id.
+4. A user reacts in the channel.
+5. The adapter normalizes the event and calls `contents-hub interaction handle`.
+6. contents-hub logs the interaction and applies the configured action, such as
+   save-and-promote for `⭐` or `❤️`.
+
+## Core CLI
+
+```text
+contents-hub init
+contents-hub sub add|remove|list
+contents-hub raw add
+contents-hub fetch
+contents-hub fetch-all
+contents-hub tick
+contents-hub daemon run|loop|install|uninstall|status
+contents-hub digest
+contents-hub lens create|list|update|delete
+contents-hub explore
+contents-hub exploration add|list|run|run-all|delete
+contents-hub deliver pending
+contents-hub delivery record|list
+contents-hub interaction handle|rules list
+contents-hub web
+```
+
+## Documentation
+
+- [Quickstart](docs/quickstart.md)
+- [Architecture](docs/architecture.md)
+- [Runtime Matrix](docs/runtime-matrix.md)
+- [Schedulers](docs/schedulers.md)
+- [Channels](docs/channels.md)
+- [Initialization](docs/initialization.md)
+
+## License
+
+MIT

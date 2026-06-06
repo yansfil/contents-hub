@@ -1,0 +1,443 @@
+{% extends "base.html" %}
+
+{% block heading %}{{ icon }} {{ sub.title or sub.url }}{% endblock %}
+
+{% block content %}
+<p><a href="/subscriptions">← Back to Subscriptions</a></p>
+
+{% if is_validating %}
+<div id="pending-approval-card" style="background:#fffaeb;border:2px solid #ffd8a8;border-radius:10px;padding:18px 20px;margin-bottom:20px;">
+    {% if not trial_result %}
+        <div style="display:flex;align-items:center;gap:10px;">
+            <div class="spinner" style="width:18px;height:18px;border:3px solid #ffe8cc;border-top-color:#f76707;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+            <strong style="color:#d9480f;">Trial fetch in progress…</strong>
+        </div>
+        <div style="margin-top:6px;font-size:13px;color:#868e96;">
+            The agent is visiting the source to confirm this subscription works. This page will refresh automatically.
+        </div>
+        <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+        <script>setTimeout(function(){ location.reload(); }, 5000);</script>
+    {% elif trial_result.ok %}
+        <div style="display:flex;align-items:center;gap:8px;">
+            <strong style="color:#2b8a3e;font-size:16px;">✓ Trial succeeded</strong>
+            <span style="font-size:12px;color:#868e96;">— {{ trial_result.finished_at[:19] if trial_result.finished_at else "" }}</span>
+        </div>
+        <div style="margin-top:8px;font-size:14px;color:#495057;">
+            {{ trial_result['items'] }} items returned.
+            {% if trial_result.recipe_mode in ["catalog", "unchanged"] %}
+                <span style="background:#e7f5ff;color:#1971c2;padding:2px 8px;border-radius:10px;font-size:12px;margin-left:4px;">Using catalog strategy</span>
+            {% endif %}
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px;">
+            <button class="btn btn-primary" id="keep-btn" type="button">Keep subscription</button>
+            <button class="btn" id="retry-btn" type="button" style="background:#fff;border:1px solid #ced4da;color:#495057;">Retry trial</button>
+            <button class="btn btn-danger" id="discard-btn" type="button">Discard</button>
+        </div>
+        {% if trial_result.samples %}
+        <div style="margin-top:18px;padding-top:14px;border-top:1px dashed #ffd8a8;">
+            <div style="font-size:12px;color:#868e96;font-weight:500;margin-bottom:10px;">Preview — these items will be saved only if you Keep.</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+            {% for sample in trial_result.samples %}
+                <div style="background:#fff;border:1px solid #ffe8cc;border-radius:8px;padding:12px 14px;">
+                    <div style="font-weight:600;color:#1a1a2e;font-size:14px;">{{ sample.title or "(no title)" }}</div>
+                    {% if sample.url %}
+                    <div style="font-size:12px;color:#1971c2;margin-top:2px;word-break:break-all;">
+                        <a href="{{ sample.url }}" target="_blank" rel="noopener" style="color:#1971c2;text-decoration:none;">{{ sample.url }}</a>
+                    </div>
+                    {% endif %}
+                    {% if sample.published_at %}
+                    <div style="font-size:11px;color:#868e96;margin-top:2px;">Published {{ sample.published_at[:19] }}</div>
+                    {% endif %}
+                    {% if sample.body %}
+                    <div style="margin-top:6px;font-size:13px;color:#495057;white-space:pre-wrap;">{{ sample.body[:300] }}{% if sample.body|length > 300 %}…{% endif %}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    {% else %}
+        <div style="display:flex;align-items:center;gap:8px;">
+            <strong style="color:#c92a2a;font-size:16px;">✗ Trial failed</strong>
+            <span style="font-size:12px;color:#868e96;">— {{ trial_result.finished_at[:19] if trial_result.finished_at else "" }}</span>
+        </div>
+        {% if trial_result.error %}
+        <div style="margin-top:8px;background:#fff5f5;padding:8px 10px;border-radius:4px;font-size:13px;color:#c92a2a;">{{ trial_result.error }}</div>
+        {% endif %}
+        <div style="margin-top:14px;display:flex;gap:8px;">
+            <button class="btn" id="retry-btn" type="button" style="background:#fff;border:1px solid #ced4da;color:#495057;">Retry trial</button>
+            <button class="btn btn-danger" id="discard-btn" type="button">Discard</button>
+        </div>
+    {% endif %}
+</div>
+<script>
+(function () {
+    const subId = "{{ sub.id }}";
+    async function post(path) {
+        const r = await fetch(path, { method: "POST" });
+        if (!r.ok) { alert("Request failed: " + r.status); return null; }
+        return r.json().catch(() => ({}));
+    }
+    const keep = document.getElementById("keep-btn");
+    if (keep) keep.addEventListener("click", async () => {
+        keep.disabled = true;
+        await post(`/subscriptions/${subId}/keep`);
+        location.href = `/subscriptions/${subId}?msg=Subscription+approved`;
+    });
+    const retry = document.getElementById("retry-btn");
+    if (retry) retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        await post(`/subscriptions/${subId}/retry_validation`);
+        location.reload();
+    });
+    const discard = document.getElementById("discard-btn");
+    if (discard) discard.addEventListener("click", async () => {
+        if (!confirm("Discard this subscription? The preview will be dropped.")) return;
+        discard.disabled = true;
+        await post(`/subscriptions/${subId}/discard`);
+        location.href = "/subscriptions?msg=Subscription+discarded";
+    });
+})();
+</script>
+{% else %}
+    {% if needs_auth %}
+    <div style="background:#fff4e6;border:1px solid #ffd8a8;color:#d9480f;padding:14px 18px;border-radius:10px;margin-bottom:16px;">
+        <strong style="font-size:15px;">🔐 Sign-in required</strong>
+        <div style="margin-top:6px;font-size:13px;color:#495057;">
+            The fetch didn't complete{% if source_label %} on {{ source_label }}{% endif %} — likely a sign-in wall.
+            Open the site in a managed Chrome window, log in there, then retry the fetch.
+            The session persists in the isolated <code>contents-hub</code> Chrome profile.
+            {% if last_manual_fetch and last_manual_fetch.error %}
+                <div style="margin-top:6px;font-family:monospace;font-size:12px;color:#868e96;">Last error: {{ last_manual_fetch.error }}</div>
+            {% endif %}
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;">
+            <button class="btn btn-primary btn-sm" id="open-login-btn" type="button">Open sign-in in Chrome</button>
+            <button class="btn btn-sm" id="confirm-auth-btn" type="button" style="background:#fff;border:1px solid #ced4da;color:#495057;">I've signed in — retry fetch</button>
+            <span id="auth-feedback" style="margin-left:6px;color:#868e96;font-size:12px;align-self:center;"></span>
+        </div>
+    </div>
+    <script>
+    (function () {
+        const subId = "{{ sub.id }}";
+        const fb = document.getElementById("auth-feedback");
+        async function post(path) {
+            const r = await fetch(path, { method: "POST" });
+            if (!r.ok) { fb.textContent = "Error: " + r.status; return null; }
+            return r.json().catch(() => ({}));
+        }
+        async function postWithConfirm(path) {
+            let r = await fetch(path, { method: "POST" });
+            if (r.status === 409) {
+                const data = await r.json().catch(() => ({}));
+                if (!window.confirm(data.error || "Killing the running fetch — proceed?")) return null;
+                r = await fetch(path + "?confirmed=true", { method: "POST" });
+            }
+            if (!r.ok) { fb.textContent = "Error: " + r.status; return null; }
+            return r.json().catch(() => ({}));
+        }
+        const openBtn = document.getElementById("open-login-btn");
+        if (openBtn) openBtn.addEventListener("click", async () => {
+            openBtn.disabled = true;
+            fb.textContent = "Opening Chrome…";
+            const res = await postWithConfirm(`/subscriptions/${subId}/open_login`);
+            openBtn.disabled = false;
+            if (res === null) { fb.textContent = ""; return; }
+            fb.textContent = (res && res.status === "opened")
+                ? "Chrome opened. Sign in there, then click 'I've signed in'."
+                : "Failed to open Chrome.";
+        });
+        const confBtn = document.getElementById("confirm-auth-btn");
+        if (confBtn) confBtn.addEventListener("click", async () => {
+            confBtn.disabled = true;
+            fb.textContent = "Retrying fetch…";
+            await post(`/subscriptions/${subId}/confirm_auth`);
+            setTimeout(() => location.reload(), 800);
+        });
+    })();
+    </script>
+    {% endif %}
+
+{% endif %}
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
+    <div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:14px 16px;">
+        <div style="font-size:12px;color:#868e96;font-weight:500;">Started</div>
+        <div style="font-size:18px;font-weight:600;color:#1a1a2e;">{{ started_at[:10] if started_at else "—" }}</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:14px 16px;">
+        <div style="font-size:12px;color:#868e96;font-weight:500;">Items</div>
+        <div style="font-size:18px;font-weight:600;color:#1a1a2e;">{{ items_total }} <span style="font-size:13px;color:#868e96;font-weight:400;">({{ items_saved }} saved)</span></div>
+    </div>
+    <div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:14px 16px;">
+        <div style="font-size:12px;color:#868e96;font-weight:500;">Last fetched</div>
+        <div style="font-size:18px;font-weight:600;color:#1a1a2e;">{{ schedule.last_run_at[:10] if schedule and schedule.last_run_at else "Never" }}</div>
+    </div>
+</div>
+
+<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
+    <div id="tab-nav" style="display:flex;gap:4px;">
+        <button class="tab-btn active" data-tab="content" type="button" style="padding:8px 14px;border:1px solid #e9ecef;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">Content</button>
+        <button class="tab-btn" data-tab="logs" type="button" style="padding:8px 14px;border:1px solid #e9ecef;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">Logs</button>
+        <button class="tab-btn" data-tab="settings" type="button" style="padding:8px 14px;border:1px solid #e9ecef;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">Settings</button>
+    </div>
+    <div style="flex:1;"></div>
+    <button class="btn btn-primary btn-sm" id="collect-btn">Fetch now</button>
+    <span id="action-feedback" style="margin-left:8px;color:#868e96;font-size:13px;"></span>
+</div>
+
+<style>
+  .tab-btn { color:#1a1a2e; }
+  .tab-btn.active { border-color:#4263eb !important; color:#4263eb !important; background:#edf2ff !important; }
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+</style>
+
+<!-- Tab: Content -->
+<div class="tab-panel active" id="tab-content">
+{% if items %}
+<table>
+    <thead>
+        <tr>
+            <th>Title</th>
+            <th>Collected</th>
+            <th>Lenses</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in items %}
+        <tr>
+            <td>
+                <a href="{{ item.url }}" target="_blank">{{ item.title or "(untitled)" }}</a>
+                {% set body = item.body or item.content_summary or "" %}
+                {% if body %}
+                <div style="margin-top:3px;font-size:12px;color:#868e96;">{{ body[:200] }}{% if body|length > 200 %}…{% endif %}</div>
+                <details style="margin-top:4px;">
+                    <summary style="color:#4263eb;font-size:12px;cursor:pointer;user-select:none;">Full text ({{ body|length }} chars)</summary>
+                    <pre style="white-space:pre-wrap;word-break:break-word;background:#f8f9fa;border:1px solid #e9ecef;border-radius:6px;padding:10px;margin:6px 0 0;font-size:12px;line-height:1.5;max-height:320px;overflow:auto;">{{ body }}</pre>
+                </details>
+                {% endif %}
+            </td>
+            <td style="color:#868e96;font-size:13px;">{{ (item.published_at or item.collected_at or "")[:10] }}</td>
+            <td>
+                {% for lens in item.lenses %}
+                    <div style="margin-bottom:8px;">
+                        <span style="background:#edf2ff;color:#4263eb;padding:2px 8px;border-radius:10px;font-size:11px;margin-right:3px;">{{ lens.id }}</span>
+                        {% if lens.summary %}
+                        <div style="margin-top:5px;font-size:12px;line-height:1.45;color:#495057;">{{ lens.summary }}</div>
+                        {% endif %}
+                        {% if lens.bullets %}
+                        <ul style="margin:5px 0 0 16px;padding:0;font-size:12px;line-height:1.45;color:#495057;">
+                            {% for bullet in lens.bullets %}
+                            <li>{{ bullet }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <span style="color:#adb5bd;font-size:12px;">—</span>
+                {% endfor %}
+            </td>
+            <td>
+                {% if item.status == "promoted" %}
+                    <span style="background:#d3f9d8;color:#2b8a3e;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;">Saved</span>
+                {% elif item.status == "archived" %}
+                    <span style="color:#adb5bd;font-size:12px;">Archived</span>
+                {% else %}
+                    <button type="button" class="save-item-btn btn" data-item-id="{{ item.id }}" style="padding:2px 10px;font-size:11px;">Save</button>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:32px;text-align:center;color:#868e96;">
+    No items yet. Try <em>Fetch now</em> to pull content.
+</div>
+{% endif %}
+</div>
+
+<!-- Tab: Logs -->
+<div class="tab-panel" id="tab-logs">
+<h3 style="font-size:14px;font-weight:600;margin:0 0 10px;">Run history (last {{ history|length }})</h3>
+{% if history %}
+<table>
+    <thead>
+        <tr>
+            <th>Started</th>
+            <th>Finished</th>
+            <th>Status</th>
+            <th>New items</th>
+            <th>Error</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for run in history %}
+        <tr>
+            <td>{{ run.started_at }}</td>
+            <td>{{ run.finished_at or "—" }}</td>
+            <td>
+                {% if run.status == "ok" %}✅ ok
+                {% elif run.status == "error" %}❌ error
+                {% elif run.status == "running" %}⏳ running
+                {% elif run.status == "skipped" %}⏭️ skipped
+                {% else %}{{ run.status }}
+                {% endif %}
+            </td>
+            <td>{{ run.new_items or 0 }}</td>
+            <td style="color:#c92a2a;font-size:12px;">{{ run.error_message or "" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color:#868e96;">No runs recorded yet.</p>
+{% endif %}
+</div>
+
+<!-- Tab: Settings -->
+<div class="tab-panel" id="tab-settings">
+<div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:16px 20px;margin-bottom:16px;">
+    <h3 style="font-size:14px;font-weight:600;margin:0 0 10px;">Overview</h3>
+    <dl style="display:grid;grid-template-columns:160px 1fr;gap:6px 16px;margin:0;font-size:13px;">
+        <dt style="color:#868e96;">URL</dt>
+        <dd style="margin:0;"><a href="{{ sub.url }}" target="_blank">{{ sub.url }}</a></dd>
+        <dt style="color:#868e96;">Source</dt>
+        <dd style="margin:0;">{{ icon }} {{ source_label }}</dd>
+        <dt style="color:#868e96;">Fetch method</dt>
+        <dd style="margin:0;">
+            {% if fetch_method %}{{ fetch_method }}{% else %}<span style="color:#adb5bd;">unknown</span>{% endif %}
+        </dd>
+        <dt style="color:#868e96;">Recipe</dt>
+        <dd style="margin:0;">
+            {% if recipe_meta.recipe_id %}
+                <code>{{ recipe_meta.recipe_id }}@v{{ recipe_meta.recipe_version }}</code>
+                <span style="color:#868e96;">({{ recipe_meta.recipe_channel or "stable" }})</span>
+            {% else %}
+                <span style="color:#adb5bd;">none</span>
+            {% endif %}
+        </dd>
+        <dt style="color:#868e96;">Capabilities</dt>
+        <dd style="margin:0;">
+            {% for cap in recipe_meta.capabilities or [] %}
+                <code style="font-size:11px;">{{ cap }}</code>{% if not loop.last %} {% endif %}
+            {% else %}
+                <span style="color:#adb5bd;">none</span>
+            {% endfor %}
+        </dd>
+        <dt style="color:#868e96;">Status</dt>
+        <dd style="margin:0;">{{ status_str }}</dd>
+    </dl>
+</div>
+
+<div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:16px 20px;margin-bottom:16px;">
+    <h3 style="font-size:14px;font-weight:600;margin:0 0 10px;">Collection Prompt <span style="font-size:11px;font-weight:400;color:#868e96;margin-left:4px;">(guides browser collection)</span></h3>
+    <form method="post" action="/subscriptions/{{ sub.id }}/collection-prompt" style="display:flex;gap:8px;align-items:flex-start;">
+        <textarea name="collection_prompt" rows="2" placeholder="e.g. only collect links from the Latest posts section; ignore nav, footer, sponsored, and recommended links"
+                  style="flex:1;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-family:inherit;font-size:13px;">{{ collection_prompt }}</textarea>
+        <button type="submit" class="btn btn-primary" style="white-space:nowrap;">Save prompt</button>
+    </form>
+    <div style="margin-top:6px;font-size:11px;color:#868e96;">
+        {% if collection_prompt %}This guidance is appended to the collection agent prompt.{% else %}Empty = use the default source recipe only.{% endif %}
+    </div>
+</div>
+
+<div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:16px 20px;margin-bottom:16px;">
+    <h3 style="font-size:14px;font-weight:600;margin:0 0 10px;">
+        Recipe Debug
+        {% if has_override %}<span style="font-size:11px;font-weight:400;color:#1971c2;margin-left:8px;">(override)</span>
+        {% else %}<span style="font-size:11px;font-weight:400;color:#868e96;margin-left:8px;">(seed)</span>
+        {% endif %}
+    </h3>
+    <textarea readonly style="width:100%;min-height:180px;font-family:monospace;font-size:12px;background:#f8f9fa;border:1px solid #e9ecef;border-radius:4px;padding:10px;">{{ recipe_text }}</textarea>
+</div>
+
+<div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:16px 20px;">
+    <h3 style="font-size:14px;font-weight:600;margin:0 0 10px;">
+        Schedule
+        {% if is_schedule_override %}
+            <span style="font-size:11px;font-weight:400;color:#1971c2;margin-left:8px;">(override)</span>
+        {% else %}
+            <span style="font-size:11px;font-weight:400;color:#868e96;margin-left:8px;">(using default)</span>
+        {% endif %}
+    </h3>
+    <div style="font-size:12px;color:#868e96;margin-bottom:10px;">
+        Default for <code>{{ sub.source_type or "webpage" }}</code>:
+        {% if default_cron %}cron <code>{{ default_cron }}</code>{% else %}every <strong>{{ default_interval }}</strong> min{% endif %}
+        — <a href="/settings">change in Settings</a>. Leave both fields blank to use the default.
+    </div>
+    <form method="post" action="/subscriptions/{{ sub.id }}/schedule" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+        <div class="form-group" style="margin:0;">
+            <label for="cron">Cron expression (optional)</label>
+            <input type="text" id="cron" name="cron" value="{{ schedule.cron_expr or '' }}" placeholder="{{ default_cron or '*/30 * * * *' }}">
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label for="interval">Interval (minutes)</label>
+            <input type="number" id="interval" name="interval" value="{{ schedule.interval_minutes or '' }}" min="1" placeholder="{{ default_interval }}">
+        </div>
+        <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+</div>
+</div>
+
+<script>
+(function () {
+    const subId = {{ sub.id | tojson }};
+    const feedback = document.getElementById('action-feedback');
+
+    // Tabs
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+        });
+    });
+
+    async function post(path) {
+        try {
+            const resp = await fetch(path, { method: 'POST' });
+            const data = await resp.json();
+            return data.status || 'done';
+        } catch (e) {
+            return 'error';
+        }
+    }
+
+    document.getElementById('collect-btn').addEventListener('click', async () => {
+        feedback.textContent = 'Requesting…';
+        const status = await post(`/subscriptions/${subId}/collect`);
+        if (status === 'started') feedback.textContent = 'Fetch started. Refresh in a moment.';
+        else if (status === 'already_running') feedback.textContent = 'Already running.';
+        else feedback.textContent = `Status: ${status}`;
+    });
+
+    // Manual save: raw_item → sources/*.md
+    document.querySelectorAll('.save-item-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const itemId = btn.dataset.itemId;
+            btn.disabled = true;
+            btn.textContent = 'Saving…';
+            try {
+                const resp = await fetch(`/raw-items/${itemId}/save`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.ok) {
+                    btn.outerHTML = '<span style="background:#d3f9d8;color:#2b8a3e;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;">Saved</span>';
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = 'Save';
+                    alert('Save failed: ' + (data.error || 'unknown'));
+                }
+            } catch (e) {
+                btn.disabled = false;
+                btn.textContent = 'Save';
+                alert('Save error: ' + e);
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

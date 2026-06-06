@@ -11,6 +11,7 @@ import pytest
 from contents_hub.runners import (
     AgentRunner,
     ClaudeSDKRunner,
+    NoAgentRunner,
     get_default_runner,
     set_default_runner,
 )
@@ -27,9 +28,11 @@ def test_claude_sdk_runner_satisfies_protocol():
     assert isinstance(runner, AgentRunner)
 
 
-def test_default_runner_is_claude_sdk():
+def test_default_runner_is_no_agent_by_default(monkeypatch):
+    monkeypatch.delenv("CONTENTS_HUB_AGENT_RUNNER", raising=False)
+    set_default_runner(None)  # type: ignore[arg-type]
     runner = get_default_runner()
-    assert isinstance(runner, ClaudeSDKRunner)
+    assert isinstance(runner, NoAgentRunner)
 
 
 def test_default_runner_is_memoized():
@@ -178,35 +181,26 @@ def test_claude_sdk_runner_accepts_tool_registry_kwarg():
     assert isinstance(runner, ClaudeSDKRunner)
 
 
-def test_sdk_plugin_path_prefers_canonical_contents_hub_plugin(tmp_path, monkeypatch):
+def test_sdk_plugin_path_uses_contents_hub_plugin(tmp_path, monkeypatch):
     from contents_hub.runners.claude_sdk import _resolve_project_plugin_path
 
     canonical = tmp_path / ".contents-hub" / "plugins" / "contents-hub-browser"
-    legacy = tmp_path / ".llm-wiki" / "plugins" / "llm-wiki-browser"
     (canonical / ".claude-plugin").mkdir(parents=True)
-    (legacy / ".claude-plugin").mkdir(parents=True)
     (canonical / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
-    (legacy / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CONTENTS_HUB_VAULT", raising=False)
-    monkeypatch.delenv("LLM_WIKI_VAULT", raising=False)
 
     assert _resolve_project_plugin_path() == str(canonical)
 
 
-def test_sdk_plugin_path_falls_back_to_legacy_llm_wiki_plugin(tmp_path, monkeypatch):
+def test_sdk_plugin_path_returns_none_without_contents_hub_plugin(tmp_path, monkeypatch):
     from contents_hub.runners.claude_sdk import _resolve_project_plugin_path
-
-    legacy = tmp_path / ".llm-wiki" / "plugins" / "llm-wiki-browser"
-    (legacy / ".claude-plugin").mkdir(parents=True)
-    (legacy / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CONTENTS_HUB_VAULT", raising=False)
-    monkeypatch.delenv("LLM_WIKI_VAULT", raising=False)
 
-    assert _resolve_project_plugin_path() == str(legacy)
+    assert _resolve_project_plugin_path() is None
 
 
 async def test_claude_sdk_runner_salvages_json_after_reader_error(monkeypatch):

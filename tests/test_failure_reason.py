@@ -131,7 +131,7 @@ class TestWebLayerNeedsAuth:
         from contents_hub.web.app import create_app
 
         vault = tmp_path
-        (vault / ".llm-wiki").mkdir()
+        (vault / ".contents-hub").mkdir()
         cfg = WikiConfig(vault_path=vault)
 
         # Schema bootstrap

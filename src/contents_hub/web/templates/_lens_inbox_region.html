@@ -1,0 +1,126 @@
+{# Server-rendered initial Lens Inbox candidate region. T5's JS replaces
+   this innerHTML on filter changes; both server and client paths must keep
+   the same structure (data-* attributes drive action wiring). #}
+{% if view.is_empty %}
+<div class="empty-state" data-empty="1">
+    No Lens candidates match the selected filters.
+</div>
+{% elif view.view_mode == "grouped" %}
+{% for group in view.groups %}
+<section class="lens-group-section" data-lens-group="{{ group.lens_id }}">
+    <h2>{{ group.lens_name }}</h2>
+    <ul class="candidate-list">
+        {% for c in group.candidates %}
+        {% set rep = c.representative %}
+        <li class="candidate-card"
+            data-candidate-id="{{ c.id }}"
+            data-status="{{ c.status }}"
+            data-subscription-id="{{ c.subscription_id or '' }}"
+            data-lens-ids="{{ c.lenses | map(attribute='id') | join(',') }}">
+            <div class="candidate-head">
+                <div>
+                    <div class="candidate-title">{{ c.title or "(no title)" }}</div>
+                    <div class="candidate-meta">
+                        <span class="badge">{{ rep.id }}</span>
+                        {% for lens in c.lenses if lens.id != rep.id %}
+                        <span class="badge">{{ lens.id }}</span>
+                        {% endfor %}
+                        <span class="badge badge-status {{ c.status }}">{{ c.status }}</span>
+                        <span>{{ c.subscription_label }}</span>
+                        {% if c.collected_at %}
+                        <span title="collected_at">{{ c.collected_at[:19] }}</span>
+                        {% endif %}
+                        {% if c.url %}
+                        <a href="{{ c.url }}" target="_blank" rel="noopener">{{ c.url }}</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% if rep.summary %}
+            <div class="candidate-summary">{{ rep.summary }}</div>
+            {% endif %}
+            {% if rep.bullets %}
+            <ul class="candidate-bullets">
+                {% for b in rep.bullets %}<li>{{ b }}</li>{% endfor %}
+            </ul>
+            {% endif %}
+            {% if c.body_preview %}
+            <div class="candidate-preview">{{ c.body_preview }}</div>
+            {% endif %}
+            {% if c.lenses | length > 1 %}
+            <details class="candidate-details">
+                <summary>All {{ c.lenses | length }} Lens summaries</summary>
+                {% for lens in c.lenses %}
+                <div class="lens-block">
+                    <strong>{{ lens.id }}</strong>
+                    {% if lens.summary %}<div>{{ lens.summary }}</div>{% endif %}
+                    {% if lens.bullets %}
+                    <ul>{% for b in lens.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </details>
+            {% endif %}
+            {% include "_lens_inbox_actions.html" %}
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endfor %}
+{% else %}
+<ul class="candidate-list">
+    {% for c in view.candidates %}
+    {% set rep = c.representative %}
+    <li class="candidate-card"
+        data-candidate-id="{{ c.id }}"
+        data-status="{{ c.status }}"
+        data-subscription-id="{{ c.subscription_id or '' }}"
+        data-lens-ids="{{ c.lenses | map(attribute='id') | join(',') }}">
+        <div class="candidate-head">
+            <div>
+                <div class="candidate-title">{{ c.title or "(no title)" }}</div>
+                <div class="candidate-meta">
+                    {% for lens in c.lenses %}
+                    <span class="badge">{{ lens.id }}</span>
+                    {% endfor %}
+                    <span class="badge badge-status {{ c.status }}">{{ c.status }}</span>
+                    <span>{{ c.subscription_label }}</span>
+                    {% if c.collected_at %}
+                    <span title="collected_at">{{ c.collected_at[:19] }}</span>
+                    {% endif %}
+                    {% if c.url %}
+                    <a href="{{ c.url }}" target="_blank" rel="noopener">{{ c.url }}</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% if rep.summary %}
+        <div class="candidate-summary">{{ rep.summary }}</div>
+        {% endif %}
+        {% if rep.bullets %}
+        <ul class="candidate-bullets">
+            {% for b in rep.bullets %}<li>{{ b }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% if c.body_preview %}
+        <div class="candidate-preview">{{ c.body_preview }}</div>
+        {% endif %}
+        {% if c.lenses | length > 1 %}
+        <details class="candidate-details">
+            <summary>All {{ c.lenses | length }} Lens summaries</summary>
+            {% for lens in c.lenses %}
+            <div class="lens-block">
+                <strong>{{ lens.id }}</strong>
+                {% if lens.summary %}<div>{{ lens.summary }}</div>{% endif %}
+                {% if lens.bullets %}
+                <ul>{% for b in lens.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </details>
+        {% endif %}
+        {% include "_lens_inbox_actions.html" %}
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}

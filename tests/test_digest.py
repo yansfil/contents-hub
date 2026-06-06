@@ -6,7 +6,7 @@ supporting evidence for R-T3, R-T6, R-B5, R-U2, R-U3, R-U5.
 
 All tests inject a synchronous stub :class:`AgentRunner` via
 ``set_default_runner`` so the suite never touches the real
-``claude_agent_sdk`` and does not require ``ANTHROPIC_API_KEY``.
+``claude_agent_sdk`` or provider API credentials.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from contents_hub.digest import (
     run_digest,
 )
 from contents_hub.runners import get_default_runner, set_default_runner
+from contents_hub.runners.no_agent import NoAgentRunner
 
 
 # ---------------------------------------------------------------------------
@@ -73,15 +74,15 @@ def stub_runner():
 
 @pytest.fixture
 def vault(tmp_path, monkeypatch):
-    """Fresh vault with .llm-wiki/ + schema-v8 DB.
+    """Fresh vault with .contents-hub/ + schema-v8 DB.
 
-    Also sets ``$LLM_WIKI_VAULT`` so the CLI can resolve the vault even
+    Also sets ``$CONTENTS_HUB_VAULT`` so the CLI can resolve the vault even
     when ``--vault`` is not passed on argv.
     """
     cfg = WikiConfig(vault_path=tmp_path)
-    (tmp_path / ".llm-wiki").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".contents-hub").mkdir(parents=True, exist_ok=True)
     init_db(cfg)
-    monkeypatch.setenv("LLM_WIKI_VAULT", str(tmp_path))
+    monkeypatch.setenv("CONTENTS_HUB_VAULT", str(tmp_path))
     return cfg
 
 
@@ -346,6 +347,25 @@ class TestLensZeroUnmatchedGroup:
         payload = json.loads(lines[0])
         assert payload["ok"] is True
         assert payload["item_count"] == 1
+
+    async def test_no_agent_digest_uses_extractive_fallback_and_writes_db(
+        self, vault
+    ):
+        """Runtime-neutral install can create a digest without provider calls."""
+        original = get_default_runner()
+        set_default_runner(NoAgentRunner())  # type: ignore[arg-type]
+        try:
+            _seed_lensed_items(vault, item_lens_pairs=[(1, "solo")])
+            result = await run_digest(vault)
+        finally:
+            set_default_runner(original)
+
+        assert result["ok"] is True
+        assert result["item_count"] == 1
+        assert isinstance(result["digest_id"], int)
+        content = _digest_content(vault, int(result["digest_id"]))
+        assert "Title 1" in content
+        assert _digest_ids(vault, [1])[1] == result["digest_id"]
 
 
 class TestTwoPassLLMCallCount:
@@ -724,7 +744,7 @@ class TestTimeoutFallback:
 
 # Repository root resolved relative to this test file (tests/test_digest.py).
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_SRC = _REPO_ROOT / "src" / "llm_wiki"
+_SRC = _REPO_ROOT / "src" / "contents_hub"
 
 
 class TestDoNotTouchRegression:
@@ -773,8 +793,6 @@ class TestDoNotTouchRegression:
         # feature would violate INV-8. The set below is the pre-feature
         # canonical baseline.
         expected = {
-            "anthropic",
-            "claude-agent-sdk",
             "httpx",
             "pyyaml",
             "python-dateutil",
@@ -808,6 +826,17 @@ class TestDoNotTouchRegression:
         assert names == expected, (
             f"INV-8 violation: unexpected dep set {names} (expected {expected})"
         )
+        optional = re.search(
+            r"claude\s*=\s*\[(?P<body>.*?)\]",
+            text,
+            re.DOTALL,
+        )
+        assert optional, "claude optional dependency block missing"
+        optional_names = {
+            re.split(r"[<>=!~\[\s]", raw, maxsplit=1)[0].strip()
+            for raw in re.findall(r'"([^"]+)"', optional.group("body"))
+        }
+        assert optional_names == {"anthropic", "claude-agent-sdk"}
 
 
 class TestNoSchedulingCodeIntroduced:

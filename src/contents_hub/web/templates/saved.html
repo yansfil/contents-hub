@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block heading %}Saved{% endblock %}
+
+{% block content %}
+<style>
+    .saved-list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .saved-item {
+        background: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 14px 16px;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+    }
+    .saved-item a {
+        font-weight: 650;
+        word-break: break-word;
+    }
+    .saved-meta {
+        color: #868e96;
+        font-size: 12px;
+        margin-top: 3px;
+    }
+    .saved-summary {
+        color: #495057;
+        font-size: 13px;
+        line-height: 1.45;
+        margin-top: 5px;
+    }
+    .save-toggle {
+        flex: 0 0 auto;
+        border: 1px solid #69db7c;
+        background: #ebfbee;
+        color: #2b8a3e;
+        border-radius: 6px;
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .empty-state {
+        background: #fff;
+        border: 1px dashed #dee2e6;
+        border-radius: 8px;
+        padding: 24px;
+        color: #868e96;
+        text-align: center;
+    }
+</style>
+
+{% if items %}
+<ul class="saved-list">
+    {% for item in items %}
+    <li class="saved-item">
+        <div>
+            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title or item.url or "(untitled)" }}</a>
+            <div class="saved-meta">
+                {% if item.source_label %}via {{ item.source_label }} - {% endif %}
+                saved {{ item.saved_at[:19].replace("T", " ") if item.saved_at else "" }}
+            </div>
+            {% if item.content_summary %}
+            <div class="saved-summary">
+                {{ item.content_summary[:240] }}{% if item.content_summary|length > 240 %}...{% endif %}
+            </div>
+            {% endif %}
+        </div>
+        <form method="post" action="/raw-items/{{ item.id }}/toggle-saved">
+            <input type="hidden" name="next_url" value="/saved">
+            <button type="submit" class="save-toggle">Saved</button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="empty-state">No saved items yet.</div>
+{% endif %}
+{% endblock %}

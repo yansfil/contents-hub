@@ -54,7 +54,7 @@ async def _stub_executor_trial(*args, **kwargs):
 @pytest.fixture
 def vault(tmp_path):
     cfg = WikiConfig(vault_path=tmp_path)
-    (tmp_path / ".llm-wiki").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".contents-hub").mkdir(parents=True, exist_ok=True)
     init_db(cfg)
     return cfg
 

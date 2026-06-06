@@ -269,11 +269,9 @@ wheels = [
 
 [[package]]
 name = "contents-hub"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "anthropic" },
-    { name = "claude-agent-sdk" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
@@ -285,6 +283,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+claude = [
+    { name = "anthropic" },
+    { name = "claude-agent-sdk" },
+]
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -293,8 +295,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.39" },
-    { name = "claude-agent-sdk", specifier = ">=0.1" },
+    { name = "anthropic", marker = "extra == 'claude'", specifier = ">=0.39" },
+    { name = "claude-agent-sdk", marker = "extra == 'claude'", specifier = ">=0.1" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
@@ -307,7 +309,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.30" },
     { name = "youtube-transcript-api", specifier = ">=0.6" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["claude", "dev"]
 
 [[package]]
 name = "cryptography"

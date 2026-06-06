@@ -1,19 +1,8 @@
-"""contents-hub canonical Python package."""
-
-from __future__ import annotations
-
-from pathlib import Path
+"""contents-hub public Python package."""
 
 __version__ = "0.2.0"
 
-# During the compatibility window the implementation files still live in the
-# legacy package directory. Expose that directory as the canonical package path
-# so new imports use ``contents_hub.*`` while old ``llm_wiki.*`` imports keep
-# resolving.
-_LEGACY_PACKAGE_DIR = Path(__file__).resolve().parent.parent / "llm_wiki"
-__path__ = [str(_LEGACY_PACKAGE_DIR)]
-
-from contents_hub.frontmatter import (  # noqa: E402
+from contents_hub.frontmatter import (
     Frontmatter,
     assemble_markdown,
     extract_raw_frontmatter,

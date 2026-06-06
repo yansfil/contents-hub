@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block heading %}Explorations{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="flash flash-error">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="/explorations" style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:20px;margin-bottom:24px;">
+    <div class="form-group">
+        <label for="original_request">Exploration request</label>
+        <textarea id="original_request" name="original_request" rows="4" required placeholder="Find recent Threads conversations about practical agent workflows, implementation tradeoffs, and examples worth reviewing."></textarea>
+    </div>
+
+    <div class="form-group">
+        <label for="recipe_markdown">Recipe Markdown</label>
+        <textarea id="recipe_markdown" name="recipe_markdown" rows="10" required placeholder="# Goal&#10;&#10;# Surfaces&#10;&#10;# Execution Phases&#10;&#10;# Checkpoint Contract"></textarea>
+    </div>
+
+    <div class="form-group">
+        <label for="display_name">Display name</label>
+        <input type="text" id="display_name" name="display_name" value="{{ suggested_display_name }}" maxlength="80">
+    </div>
+
+    <div class="form-group">
+        <label>Target surfaces</label>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            {% for opt in surface_options %}
+            <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;margin:0;color:{% if opt.disabled %}#868e96{% else %}#1a1a2e{% endif %};">
+                <input type="checkbox" name="target_surfaces" value="{{ opt.id }}" {% if loop.first %}checked{% endif %} {% if opt.disabled %}disabled{% endif %} style="width:auto;margin-top:4px;">
+                <span>
+                    <span style="font-weight:600;">{{ opt.label }}</span>
+                    <span style="display:block;font-size:12px;color:#868e96;">{{ opt.description }}</span>
+                </span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>Lens</label>
+        {% if lens_options %}
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            {% for lens in lens_options %}
+            <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;margin:0;color:#1a1a2e;">
+                <input type="checkbox" name="lens_ids" value="{{ lens.id }}" style="width:auto;margin-top:4px;">
+                <span>
+                    <span style="font-weight:600;">{{ lens.name or lens.id }}</span>
+                    {% if lens.description %}
+                    <span style="display:block;font-size:12px;color:#868e96;">{{ lens.description }}</span>
+                    {% else %}
+                    <span style="display:block;font-size:12px;color:#868e96;">{{ lens.id }}</span>
+                    {% endif %}
+                </span>
+            </label>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="font-size:13px;color:#868e96;">No enabled Lenses yet.</p>
+        {% endif %}
+    </div>
+
+    <button type="submit" class="btn btn-primary">Register exploration</button>
+</form>
+
+<h2 style="font-size:18px;font-weight:600;margin-bottom:12px;">Recent explorations</h2>
+{% if drafts %}
+<div style="display:flex;flex-direction:column;gap:10px;">
+    {% for draft in drafts %}
+    <div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:14px 18px;">
+        <div style="display:flex;gap:12px;align-items:flex-start;justify-content:space-between;">
+            <div style="min-width:0;">
+                <div style="font-size:15px;font-weight:600;color:#1a1a2e;"><a href="/explorations/{{ draft.id }}">{{ draft.display_name }}</a></div>
+                <div style="font-size:13px;color:#495057;margin-top:4px;">{{ draft.original_request }}</div>
+                <div style="font-size:12px;color:#868e96;margin-top:6px;">
+                    {{ draft.target_surfaces | join(", ") }}
+                    {% if draft.lens_ids %} · Lens: {{ draft.lens_ids | join(", ") }}{% endif %}
+                </div>
+                {% if draft.last_run_status %}
+                <div style="font-size:12px;color:#868e96;margin-top:4px;">Last run: {{ draft.last_run_status }}{% if draft.last_run_time %} · {{ draft.last_run_time }}{% endif %}</div>
+                {% endif %}
+            </div>
+            <span style="background:{% if draft.status == 'registered' %}#e7f5ff{% else %}#fff4e6{% endif %};color:{% if draft.status == 'registered' %}#1864ab{% else %}#d9480f{% endif %};padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;white-space:nowrap;">{{ draft.status }}</span>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#868e96;">No explorations yet.</p>
+{% endif %}
+
+{% if selected %}
+{% set exploration = selected.exploration %}
+{% set strategy = selected.strategy %}
+<section style="margin-top:28px;border-top:1px solid #e9ecef;padding-top:22px;">
+    <div style="display:flex;gap:12px;align-items:flex-start;justify-content:space-between;margin-bottom:14px;">
+        <div>
+            <h2 style="font-size:20px;font-weight:650;margin:0 0 6px;">{{ exploration.display_name }}</h2>
+            <div style="font-size:13px;color:#495057;">{{ exploration.original_request }}</div>
+            <div style="font-size:12px;color:#868e96;margin-top:6px;">
+                {{ exploration.target_surfaces | join(", ") }}
+                {% if exploration.lens_ids %} · Lens: {{ exploration.lens_ids | join(", ") }}{% endif %}
+            </div>
+        </div>
+        <span style="background:#fff4e6;color:#d9480f;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap;">{{ selected.status_label }}</span>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+        {% if exploration.status == "registered" %}
+        <form method="post" action="/explorations/{{ exploration.id }}/run">
+            <button type="submit" class="btn btn-primary">Run manually</button>
+        </form>
+        {% endif %}
+    </div>
+    {% if exploration.status == "registered" %}
+    <p style="font-size:12px;color:#868e96;margin:-8px 0 16px;">Manual runs only in this MVP. Registered explorations are not scheduled by the daemon.</p>
+    {% endif %}
+
+    {% if strategy %}
+    <div style="background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:16px;margin-bottom:16px;">
+        <div style="display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <h3 style="font-size:16px;font-weight:650;margin:0;">Recipe version {{ strategy.version }}</h3>
+            <span style="font-size:12px;color:#868e96;">{{ strategy.approved_at }}</span>
+        </div>
+
+        <details open>
+            <summary>Recipe</summary>
+            <pre style="white-space:pre-wrap;background:#f8f9fa;border:1px solid #e9ecef;border-radius:8px;padding:12px;font-size:12px;">{{ strategy.strategy_pretty }}</pre>
+        </details>
+    </div>
+    {% endif %}
+
+    {% if selected.runs %}
+    <div style="margin-top:16px;background:#fff;border:1px solid #e9ecef;border-radius:8px;padding:16px;">
+        <h3 style="font-size:16px;font-weight:650;margin:0 0 10px;">Manual run results</h3>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+            {% for run in selected.runs %}
+            <div style="border:1px solid #e9ecef;border-radius:8px;padding:12px;">
+                <div style="display:flex;gap:12px;align-items:center;justify-content:space-between;">
+                    <div style="font-size:14px;font-weight:600;">Run {{ run.id }} · {{ run.status }}</div>
+                    <div style="font-size:12px;color:#868e96;">{{ run.finished_at or run.started_at }}</div>
+                </div>
+                <div style="font-size:13px;color:#495057;margin-top:6px;">{{ run.items_found }} found · {{ run.items_inserted }} new raw items</div>
+                {% if run.error %}<div class="flash flash-error" style="margin-top:8px;">{{ run.error }}</div>{% endif %}
+                {% if run.raw_items %}
+                <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">
+                    {% for item in run.raw_items %}
+                    <div style="font-size:13px;">
+                        <a href="/lens-inbox?raw_item_id={{ item.id }}">{{ item.title or item.url }}</a>
+                        <span style="color:#868e96;">· {{ item.status }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <details style="margin-top:8px;">
+                    <summary>Run trace</summary>
+                    {% if run.raw_trace_pretty %}
+                    <pre style="white-space:pre-wrap;background:#f8f9fa;border:1px solid #e9ecef;border-radius:8px;padding:12px;font-size:12px;">{{ run.raw_trace_pretty }}</pre>
+                    {% else %}
+                    <p style="font-size:13px;color:#868e96;">No raw trace artifact recorded.</p>
+                    {% endif %}
+                </details>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endif %}
+
+<script>
+(function () {
+    const requestInput = document.getElementById('original_request');
+    const nameInput = document.getElementById('display_name');
+    let userEditedName = false;
+
+    function suggestName(value) {
+        const words = (value.match(/[A-Za-z0-9가-힣]+/g) || []).slice(0, 6);
+        return (words.join(' ') || 'Exploration').slice(0, 80);
+    }
+
+    nameInput.addEventListener('input', () => {
+        userEditedName = true;
+    });
+    requestInput.addEventListener('input', () => {
+        if (!userEditedName) {
+            nameInput.value = suggestName(requestInput.value);
+        }
+    });
+})();
+</script>
+{% endblock %}
