@@ -44,7 +44,6 @@ contents-hub creates and attaches a `manual-inbox` Lens automatically so the
 item can appear in the next digest:
 
 ```bash
-contents-hub --vault ~/contents-vault raw add https://example.com/story
 contents-hub --vault ~/contents-vault raw add "A pasted note" --title "Manual note"
 ```
 
@@ -53,7 +52,7 @@ digest:
 
 ```bash
 contents-hub --vault ~/contents-vault lens create ai --name "AI" --keyword ai
-contents-hub --vault ~/contents-vault sub add https://example.com/feed.xml --title "Example"
+contents-hub --vault ~/contents-vault sub add <rss-feed-url> --type rss.feed --title "Example"
 contents-hub --vault ~/contents-vault sub list --format json
 ```
 

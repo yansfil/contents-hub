@@ -93,11 +93,21 @@ def test_launch_docs_keep_first_success_and_followups_clear():
     quickstart = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
     channels = (ROOT / "docs" / "channels.md").read_text(encoding="utf-8")
     launch = (ROOT / "docs" / "launch.md").read_text(encoding="utf-8")
+    runtime_matrix = (ROOT / "docs" / "runtime-matrix.md").read_text(encoding="utf-8")
+    skill = (ROOT / "skills" / "contents-hub" / "SKILL.md").read_text(encoding="utf-8")
 
     assert "Reliable first-launch path" in readme
     assert "manual content, local digest generation" in install
     assert "Manual URL/text is the shortest first-launch path" in quickstart
     assert "automatic `manual-inbox`" in launch
     assert "does not ship built-in Telegram, Slack, or Discord bot packages" in channels
+    assert "ok`, `count`, and `items`" in channels
+    assert "openclaw skills install ./skills/contents-hub --as contents-hub --global" in install
+    assert "OpenClaw Git installs expect `SKILL.md` at repo root" in skill
+    assert "hermes skills install skills-sh/yansfil/contents-hub/skills/contents-hub --yes" in install
+    assert "hermes cron create" in (ROOT / "docs" / "schedulers.md").read_text(encoding="utf-8")
+    assert "Skill Registration Notes" in runtime_matrix
+    assert "version: 0.2.0" in skill
     assert "platform demo" in launch
-    assert "contents-hub-explore" not in readme + install + quickstart + channels + launch
+    public_launch_docs = readme + install + quickstart + channels + launch + runtime_matrix + skill
+    assert "contents-hub-explore" not in public_launch_docs

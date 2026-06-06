@@ -19,22 +19,39 @@ Telegram/Slack/Discord bot adapters are optional or follow-up paths.
 
 ## Recommended: Skill-First
 
-Use your agent runtime's skill installer and point it at:
+Use your agent runtime's skill installer and point it at the single
+`contents-hub` skill.
+
+Hermes:
+
+```bash
+hermes skills install skills-sh/yansfil/contents-hub/skills/contents-hub --yes
+```
+
+OpenClaw:
+
+```bash
+git clone https://github.com/yansfil/contents-hub "$HOME/contents-hub"
+cd "$HOME/contents-hub"
+openclaw skills install ./skills/contents-hub --as contents-hub --global
+```
+
+Generic target:
 
 ```text
 https://github.com/yansfil/contents-hub
 skills/contents-hub/SKILL.md
 ```
 
-If your runtime supports an `npx skills` style installer, install only the
-`contents-hub` skill from this repo. The exact command depends on that runtime's
-skill installer, but the target is the single `skills/contents-hub/SKILL.md`
-file.
+If your runtime supports an `npx skills` style installer, install only this
+single skill. Do not install the repository root as a skill unless that runtime
+explicitly supports nested skill paths.
 
 Then start a new agent session and ask:
 
 ```text
-Install contents-hub, initialize a vault at ~/contents-vault, and add this RSS feed: https://example.com/feed.xml
+Install contents-hub, initialize a vault at ~/contents-vault, add a manual note,
+run a digest, and open the dashboard.
 ```
 
 The agent should:
@@ -46,6 +63,39 @@ The agent should:
 5. Initialize or reuse the requested vault.
 6. Use CLI commands such as `sub add`, `fetch-all`, `digest`, `deliver pending`,
    `delivery record`, and `interaction handle`.
+
+## Runtime-Specific Skill Registration
+
+contents-hub ships the skill at `skills/contents-hub/SKILL.md`, not at the repo
+root. Use the runtime's local-skill flow when a Git installer expects `SKILL.md`
+at the source root.
+
+### OpenClaw
+
+OpenClaw's native Git skill install expects `SKILL.md` at the repository root.
+For this repo, clone first and install the skill subdirectory:
+
+```bash
+git clone https://github.com/yansfil/contents-hub "$HOME/contents-hub"
+cd "$HOME/contents-hub"
+openclaw skills install ./skills/contents-hub --as contents-hub --global
+```
+
+Omit `--global` if you want the skill installed only into the active OpenClaw
+workspace. Start a new OpenClaw session after installing so it reloads skills.
+
+### Hermes
+
+Current Hermes installs from skills.sh and GitHub-style skill paths:
+
+```bash
+hermes skills install skills-sh/yansfil/contents-hub/skills/contents-hub --yes
+hermes skills list
+```
+
+Start a new Hermes session after installing so the skill is loaded. Do not point
+Hermes at only `https://github.com/yansfil/contents-hub`; the install target must
+include the nested skill path.
 
 ## Agent Contract
 
@@ -64,14 +114,13 @@ If you do not use skills, install the CLI directly:
 ```bash
 git clone https://github.com/yansfil/contents-hub "$HOME/contents-hub"
 cd "$HOME/contents-hub"
-uv sync --all-extras
 uv tool install -e "$PWD" --force
 uv tool update-shell
 contents-hub --help
 ```
 
-The base install is runtime-neutral. Claude-backed browser/agent features are
-optional:
+The base install is runtime-neutral. For local development or Claude-backed
+browser/agent features, install optional extras explicitly:
 
 ```bash
 uv sync --extra claude --extra dev
@@ -89,7 +138,9 @@ transport. contents-hub owns local state and content actions.
 Common runtime commands:
 
 ```bash
-contents-hub --vault "$HOME/contents-vault" sub add https://example.com/feed.xml
+contents-hub --vault "$HOME/contents-vault" raw add "A pasted note" --title "Manual note"
+contents-hub --vault "$HOME/contents-vault" lens create ai --name "AI" --keyword ai
+contents-hub --vault "$HOME/contents-vault" sub add <rss-feed-url> --type rss.feed --title "Example"
 contents-hub --vault "$HOME/contents-vault" browser open https://x.com/login
 contents-hub --vault "$HOME/contents-vault" fetch-all
 contents-hub --vault "$HOME/contents-vault" digest
@@ -105,7 +156,7 @@ Run this after installing or updating:
 ```bash
 VAULT="$(mktemp -d)/vault"
 contents-hub --vault "$VAULT" init "$VAULT"
-contents-hub --vault "$VAULT" raw add https://example.com/story --title "Example story"
+contents-hub --vault "$VAULT" raw add "Example story body" --title "Example story"
 contents-hub --vault "$VAULT" digest
 contents-hub --vault "$VAULT" deliver pending --format json
 contents-hub --vault "$VAULT" delivery record \

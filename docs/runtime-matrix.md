@@ -10,6 +10,19 @@
 | Claude Code loop | Agent loop and scheduling | `fetch-all`, `exploration run-all`, `digest` |
 | Codex loop | Agent loop and scheduling | `fetch-all`, `exploration run-all`, `digest` |
 
+## Skill Registration Notes
+
+The repo-local skill lives at `skills/contents-hub/SKILL.md`.
+
+- OpenClaw: Git skill installs expect `SKILL.md` at the source root, so install
+  from a local checkout subdirectory:
+  `openclaw skills install ./skills/contents-hub --as contents-hub --global`.
+- Hermes: install the skills.sh path:
+  `hermes skills install skills-sh/yansfil/contents-hub/skills/contents-hub --yes`.
+  Start a new Hermes session after installing so the skill is loaded.
+- Other coding agents: register the same `SKILL.md` file or ask the agent to
+  read it from the checkout, then let the CLI own behavior.
+
 ## Runner Selection
 
 The base install is runtime-neutral:

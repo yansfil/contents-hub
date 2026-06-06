@@ -45,6 +45,35 @@ Hermes should own gateway and scheduler lifecycle. It can:
 5. call `delivery record`
 6. forward reactions to `interaction handle`
 
+Hermes cron jobs run in fresh sessions and can attach skills. A minimal local
+daily digest job:
+
+```bash
+hermes skills install skills-sh/yansfil/contents-hub/skills/contents-hub --yes
+hermes cron create "0 8 * * *" \
+  "Use the contents-hub skill. Run contents-hub --vault ~/contents-vault fetch-all, then contents-hub --vault ~/contents-vault digest. Report the digest result and any fetch errors." \
+  --skill contents-hub \
+  --workdir "$HOME/contents-hub" \
+  --deliver local \
+  --name contents-hub-daily
+hermes cron list
+```
+
+For automatic delivery, configure the Hermes gateway and use a Hermes delivery
+target such as `--deliver telegram` or `--deliver discord`:
+
+```bash
+hermes gateway setup
+hermes gateway install
+hermes gateway start
+hermes gateway status
+```
+
+Hermes delivers the cron final response itself. Use the lower-level
+`deliver pending` / `delivery record` / `interaction handle` flow only when you
+are building a real channel adapter that needs per-card message ids and reaction
+round-trips.
+
 ## OpenClaw
 
 OpenClaw should own scheduled tasks and channel gateway code. Treat

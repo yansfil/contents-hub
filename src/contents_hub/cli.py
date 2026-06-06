@@ -788,8 +788,9 @@ def _handle_fetch_all(config, args) -> int:
         traceback.print_exc()
         return 1
 
-    _emit_json(_tick_to_json(result))
-    return 0
+    payload = _tick_to_json(result)
+    _emit_json(payload)
+    return 0 if payload.get("ok") is True else 1
 
 
 # ---------------------------------------------------------------------------

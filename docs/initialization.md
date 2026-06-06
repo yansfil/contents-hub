@@ -100,7 +100,6 @@ manual items can appear in the next digest.
 Add ad-hoc read-later content:
 
 ```bash
-contents-hub raw add https://example.com/article --title "Read later"
 contents-hub raw add "A pasted note" --title "Manual note"
 ```
 
@@ -109,7 +108,7 @@ digest:
 
 ```bash
 contents-hub lens create ai --name "AI" --keyword ai
-contents-hub sub add https://example.com/feed.xml --title "Example"
+contents-hub sub add <rss-feed-url> --type rss.feed --title "Example"
 contents-hub sub list --format json
 ```
 

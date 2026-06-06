@@ -13,8 +13,8 @@ webhooks, and platform SDKs.
 contents-hub --vault ~/contents-vault deliver pending --format json
 ```
 
-Each card includes stable ids such as `raw_item_id`, `digest_id`, and
-`payload_type`.
+The response is an object with `ok`, `count`, and `items`. Each item includes
+stable ids such as `raw_item_id`, `digest_id`, and `payload_type`.
 
 Adapters may send raw item cards, digest cards, or digest section/item cards.
 The adapter should treat contents-hub ids as opaque stable references and store
@@ -75,3 +75,14 @@ Default rules:
 The base package does not import Telegram, Slack, or Discord SDKs. Full bots can
 live in optional integration packages or external runtimes as long as they call
 the same CLI contract.
+
+Hermes has two usable patterns:
+
+- Cron final-response delivery: let Hermes run `fetch-all` and `digest`, then
+  deliver the final response with `hermes cron create ... --deliver telegram`.
+  This is enough for a daily digest but does not create per-card message
+  mappings in contents-hub.
+- Adapter delivery: a Hermes prompt or external gateway reads
+  `deliver pending --format json`, sends each item through Telegram/Discord/etc.,
+  records returned message ids with `delivery record`, and forwards reactions to
+  `interaction handle`.

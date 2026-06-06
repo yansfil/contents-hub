@@ -617,6 +617,35 @@ def test_fetch_all_cli_stdout_remains_single_json_object(monkeypatch, tmp_path, 
     assert payload["skipped"] == 2
 
 
+def test_fetch_all_cli_exits_nonzero_when_any_subscription_fails(monkeypatch, tmp_path, capsys):
+    _cfg(tmp_path)
+
+    async def _fake_collect_all_active(
+        config,
+        *,
+        include_error=False,
+        per_subscription_timeout_seconds=120.0,
+        concurrency=1,
+    ):
+        return SimpleNamespace(
+            total=1,
+            new=0,
+            skipped=0,
+            errors=1,
+            duration_seconds=0.25,
+            per_subscription=[],
+        )
+
+    monkeypatch.setattr("contents_hub.cli.collect_all_active", _fake_collect_all_active)
+
+    exit_code = cli_main(["--vault", str(tmp_path), "fetch-all"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["error"] == "1 subscription(s) failed"
+
+
 def test_fetch_all_cli_forwards_concurrency(monkeypatch, tmp_path, capsys):
     _cfg(tmp_path)
 

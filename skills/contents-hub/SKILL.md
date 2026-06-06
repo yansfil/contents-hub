@@ -1,7 +1,7 @@
 ---
 name: contents-hub
 description: Use when the user asks how to use the contents-hub CLI, initialize or target a vault, manage subscriptions, fetch/tick sources, run explorations, manage Lenses, run the daemon, produce digests, generate delivery payloads, or handle channel interactions.
-version: 0.1.0
+version: 0.2.0
 platforms: [macos, linux]
 metadata:
   hermes:
@@ -51,7 +51,6 @@ else
   cd "$INSTALL_DIR"
 fi
 
-uv sync --all-extras
 uv tool install -e "$PWD" --force
 uv tool update-shell
 contents-hub --help
@@ -59,6 +58,19 @@ contents-hub --help
 
 If the checkout has uncommitted changes, stop and report the dirty files
 instead of overwriting them.
+
+## Runtime Skill Registration
+
+This repo stores the skill at `skills/contents-hub/SKILL.md`.
+
+- OpenClaw: if using native skill install, clone the repo first and run
+  `openclaw skills install ./skills/contents-hub --as contents-hub --global`
+  from the checkout. OpenClaw Git installs expect `SKILL.md` at repo root, so
+  `openclaw skills install git:yansfil/contents-hub` is not the right shape.
+- Hermes: install the skills.sh path with
+  `hermes skills install skills-sh/yansfil/contents-hub/skills/contents-hub --yes`.
+  Start a new session after installing. Do not point Hermes at only the repo URL;
+  the target must include the nested skill path.
 
 ## Vault Targeting
 
@@ -105,7 +117,7 @@ contents-hub sub list --type rss.feed --format json
 Add a subscription:
 
 ```bash
-contents-hub sub add https://example.com/feed.xml --title "Example"
+contents-hub sub add <rss-feed-url> --type rss.feed --title "Example"
 contents-hub sub add https://www.youtube.com/@example --type youtube.channel
 contents-hub sub add https://x.com/example --type x.profile
 contents-hub sub add https://www.threads.net/@example --type threads.profile
@@ -123,7 +135,7 @@ Fetch one subscription by id or URL:
 
 ```bash
 contents-hub fetch 15
-contents-hub fetch https://example.com/feed.xml --max-items 10
+contents-hub fetch <rss-feed-url> --max-items 10
 ```
 
 Fetch every active or error subscription:
@@ -372,8 +384,9 @@ Canonical source types:
 - `reddit.subreddit`
 - `webpage`
 
-The CLI can infer many URLs, so `--type` is optional unless the user wants to
-force a source type.
+The CLI can infer many URLs, but agents should pass `--type rss.feed` for RSS
+feeds because many valid feed URLs do not contain `.xml`, `.rss`, `.atom`, or
+`/feed`.
 
 ## Output Contract
 

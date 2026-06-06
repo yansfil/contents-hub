@@ -115,14 +115,21 @@ does not require chromux for base RSS/manual/digest workflows.
 
 ```bash
 contents-hub init ~/contents-vault
-contents-hub --vault ~/contents-vault sub add https://example.com/feed.xml --title "Example"
-contents-hub --vault ~/contents-vault sub list --format json
-contents-hub --vault ~/contents-vault raw add https://example.com/story
+contents-hub --vault ~/contents-vault raw add "A pasted note" --title "Manual note"
 contents-hub --vault ~/contents-vault digest
 contents-hub --vault ~/contents-vault web --port 8585
 ```
 
 Open `http://localhost:8585` for the dashboard.
+
+For RSS, create a Lens first, then add a real feed URL:
+
+```bash
+contents-hub --vault ~/contents-vault lens create ai --name "AI" --keyword ai
+contents-hub --vault ~/contents-vault sub add <rss-feed-url> --type rss.feed --title "Example"
+contents-hub --vault ~/contents-vault fetch-all
+contents-hub --vault ~/contents-vault digest
+```
 
 ## Interaction Flow
 
