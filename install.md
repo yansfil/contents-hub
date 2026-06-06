@@ -14,6 +14,18 @@ contents-hub is a local-first Python CLI and FastAPI dashboard for collecting
 subscriptions, raw items, digests, delivery mappings, and channel interactions
 into a user-owned vault.
 
+## Agent Install Contract
+
+If you are an AI agent and the user asks you to install contents-hub from this
+file, do the work end to end without asking follow-up questions unless the next
+step requires a user-owned action, such as installing Python, installing `uv`,
+authenticating GitHub, choosing a non-default vault, or resolving uncommitted
+changes in an existing checkout.
+
+The default supported install target is macOS/Linux. Prefer a durable checkout
+path such as `$HOME/contents-hub` or `$HOME/team-attention/contents-hub`, not a
+temporary directory.
+
 ## Requirements
 
 - Python 3.11+
@@ -54,8 +66,10 @@ contents-hub --help
 python -m contents_hub --help
 
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub"
+[ -L "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md" ] && rm "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md"
 cp "$PWD/skills/contents-hub/SKILL.md" "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md"
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore"
+[ -L "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md" ] && rm "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md"
 cp "$PWD/skills/contents-hub-explore/SKILL.md" "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md"
 
 mkdir -p "$HOME/.claude/skills/contents-hub"
@@ -67,6 +81,29 @@ mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub"
 ln -sf "$PWD/skills/contents-hub/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub/SKILL.md"
 mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub-explore"
 ln -sf "$PWD/skills/contents-hub-explore/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub-explore/SKILL.md"
+
+CONTENTS_HUB_GUIDE='
+## contents-hub
+
+Use the repo-local contents-hub skills for vault operations, subscriptions,
+digests, delivery payloads, and channel interactions when available.
+'
+
+touch "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
+if ! grep -Fq 'Use the repo-local contents-hub skills' "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"; then
+  printf '\n%s\n' "$CONTENTS_HUB_GUIDE" >> "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
+fi
+
+mkdir -p "$HOME/.claude"
+touch "$HOME/.claude/CLAUDE.md"
+if ! grep -Fq 'Use the repo-local contents-hub skills' "$HOME/.claude/CLAUDE.md"; then
+  printf '\n%s\n' "$CONTENTS_HUB_GUIDE" >> "$HOME/.claude/CLAUDE.md"
+fi
+
+touch "${HERMES_HOME:-$HOME/.hermes}/AGENTS.md"
+if ! grep -Fq 'Use the repo-local contents-hub skills' "${HERMES_HOME:-$HOME/.hermes}/AGENTS.md"; then
+  printf '\n%s\n' "$CONTENTS_HUB_GUIDE" >> "${HERMES_HOME:-$HOME/.hermes}/AGENTS.md"
+fi
 ```
 
 New Codex, Claude Code, or Hermes sessions should then load the two
@@ -126,6 +163,11 @@ This repo ships two independent skills:
 
 Register both when possible. Register only `contents-hub` if the runtime should
 manage subscriptions and daemon tasks but never design explorations.
+
+OpenClaw or another agent runtime can use the same contract: install the
+`contents-hub` CLI globally, copy or symlink the two `SKILL.md` files into that
+runtime's global skill directory, and add a short global instruction pointing
+agents to those skills.
 
 ### Codex
 
@@ -204,6 +246,61 @@ contents-hub deliver pending --help
 contents-hub delivery record --help
 contents-hub interaction handle --help
 contents-hub daemon --help
+```
+
+For a deeper local smoke that does not require credentials:
+
+```bash
+VAULT="$(mktemp -d)/vault"
+contents-hub --vault "$VAULT" init "$VAULT"
+contents-hub --vault "$VAULT" raw add https://example.com/story --title "Example story"
+contents-hub --vault "$VAULT" digest
+contents-hub --vault "$VAULT" deliver pending --format json
+contents-hub --vault "$VAULT" delivery record \
+  --platform demo \
+  --channel-id demo-channel \
+  --message-id demo-message \
+  --payload-type raw_item \
+  --raw-item-id 1
+contents-hub --vault "$VAULT" interaction handle \
+  --platform demo \
+  --channel-id demo-channel \
+  --message-id demo-message \
+  --kind reaction \
+  --value "⭐" \
+  --format json
+```
+
+Expected result: the CLI prints help, creates a vault, creates a digest, emits
+delivery JSON, records a demo message mapping, and handles the reaction without
+requiring provider credentials.
+
+## Verify Installed Skills
+
+Codex:
+
+```bash
+ls -l "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md"
+test ! -L "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md"
+ls -l "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md"
+test ! -L "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md"
+grep -n 'Use the repo-local contents-hub skills' "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
+```
+
+Claude Code:
+
+```bash
+ls -l "$HOME/.claude/skills/contents-hub/SKILL.md"
+ls -l "$HOME/.claude/skills/contents-hub-explore/SKILL.md"
+grep -n 'Use the repo-local contents-hub skills' "$HOME/.claude/CLAUDE.md"
+```
+
+Hermes:
+
+```bash
+ls -l "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub/SKILL.md"
+ls -l "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub-explore/SKILL.md"
+grep -n 'Use the repo-local contents-hub skills' "${HERMES_HOME:-$HOME/.hermes}/AGENTS.md"
 ```
 
 ## Maintenance Notes

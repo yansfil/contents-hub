@@ -2,6 +2,16 @@
 
 ## 1. Install
 
+Agent install:
+
+```bash
+curl -L https://raw.githubusercontent.com/yansfil/contents-hub/main/install.md \
+  -o /tmp/contents-hub-install.md
+# Run the "One-Pass Agent Setup" block from install.md.
+```
+
+Manual install:
+
 ```bash
 git clone https://github.com/yansfil/contents-hub
 cd contents-hub
@@ -68,3 +78,6 @@ contents-hub --vault ~/contents-vault interaction handle \
   --kind reaction \
   --value "⭐"
 ```
+
+See `install.md` for Codex, Claude Code, Hermes, and generic agent skill
+registration.

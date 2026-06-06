@@ -5,6 +5,10 @@ vault, and make repo-outside commands target the same vault.
 
 ## 1. Install The CLI
 
+For agent-operated setup, use the one-pass install contract in `install.md`.
+It installs the CLI, registers skills for common agent runtimes, and runs smoke
+tests.
+
 From a checkout:
 
 ```bash

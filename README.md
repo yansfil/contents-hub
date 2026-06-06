@@ -38,6 +38,16 @@ content state and actions.
 
 ## Install
 
+Agent-friendly one-pass install:
+
+```bash
+curl -L https://raw.githubusercontent.com/yansfil/contents-hub/main/install.md \
+  -o /tmp/contents-hub-install.md
+# Then run the "One-Pass Agent Setup" block from install.md.
+```
+
+Manual install:
+
 ```bash
 git clone https://github.com/yansfil/contents-hub
 cd contents-hub
@@ -59,6 +69,26 @@ behind the `claude` optional extra:
 uv sync --extra claude --extra dev
 CONTENTS_HUB_AGENT_RUNNER=claude-sdk contents-hub --help
 ```
+
+See [install.md](install.md) for the full agent install contract, skill
+registration for Codex, Claude Code, and Hermes, and smoke tests.
+
+## Agent Skills
+
+contents-hub ships repo-local skills so coding agents can install the CLI, pick
+the correct vault, add subscriptions, fetch content, design explorations, run
+digests, and wire channel interactions without re-reading the whole codebase.
+
+- [install.md](install.md) - one-pass setup, skill registration, smoke tests,
+  and troubleshooting
+- [skills/contents-hub/SKILL.md](skills/contents-hub/SKILL.md) - day-to-day
+  CLI and vault operations
+- [skills/contents-hub-explore/SKILL.md](skills/contents-hub-explore/SKILL.md)
+  - exploration recipe design with chromux probing
+- [AGENTS.md](AGENTS.md) - repository guidance for coding agents
+
+Use `chromux` for browser-backed exploration when it is available. contents-hub
+does not require chromux for base RSS/manual/digest workflows.
 
 ## Quickstart
 
