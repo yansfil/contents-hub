@@ -727,6 +727,15 @@ async def _classify_and_summarize_lens(
                 len(chunk),
             )
             continue
+        except Exception as exc:  # noqa: BLE001 - deterministic keyword matches still apply
+            logger.warning(
+                "Lens classifier failed for lens %s; keyword fallback matched %s/%s items: %s",
+                lens.id,
+                len(keyword_items),
+                len(items),
+                exc,
+            )
+            continue
         parsed = _extract_json_object(text or "")
         chunk_matches = parsed.get("matches") or parsed.get("items", [])
         if isinstance(chunk_matches, list):
