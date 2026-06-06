@@ -32,12 +32,9 @@ venv/
 # Node (if any)
 node_modules/
 
-# contents-hub runtime state (keep bundled plugins under .contents-hub/plugins/)
-.contents-hub/*
-!.contents-hub/plugins/
-!.contents-hub/plugins/**
-.contents-hub/plugins/**/__pycache__/
-.contents-hub/plugins/**/*.py[cod]
+# contents-hub runtime state
+.contents-hub/
+.contents-hub.yaml
 
 # Exploration raw trace artifacts can be large and should stay local
 .contents-hub/exploration-artifacts/

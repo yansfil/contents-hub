@@ -1,8 +1,8 @@
 """Claude Agent SDK runner.
 
 Wraps `claude_agent_sdk.query()` in the `AgentRunner` protocol. Preserves
-the existing behavior from `fetchers/browser.py`: loads the bundled
-the bundled browser plugin if discoverable, runs under
+the existing behavior from `fetchers/browser.py`: loads a vault-local
+browser plugin if discoverable, runs under
 `permission_mode=bypassPermissions`, logs tool use and text turns.
 
 R-T2.1 / R-T13.1 / R-T13.2 / R-T14.1:
@@ -44,7 +44,7 @@ _MAX_TOOL_RESULT_CHARS = int(
 
 
 def _resolve_project_plugin_path() -> str | None:
-    """Locate the bundled browser plugin directory.
+    """Locate a vault-local browser plugin directory.
 
     Walks up from the current working directory and configured vault env vars
     looking for `.contents-hub/plugins/contents-hub-browser`.
