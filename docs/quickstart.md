@@ -39,6 +39,8 @@ This creates:
 
 ## 3. Add Content
 
+RSS and manual URL/text are the reliable first-launch path:
+
 ```bash
 contents-hub --vault ~/contents-vault sub add https://example.com/feed.xml --title "Example"
 contents-hub --vault ~/contents-vault raw add https://example.com/story
@@ -75,15 +77,19 @@ chromux Chrome profile.
 
 ## 7. Try Delivery And Interaction
 
+This smoke uses a demo platform. Real Telegram, Slack, or Discord transport is
+owned by an external gateway or agent runtime.
+
 ```bash
 contents-hub --vault ~/contents-vault deliver pending --format json
 contents-hub --vault ~/contents-vault delivery record \
-  --platform telegram \
+  --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
+  --payload-type raw_item \
   --raw-item-id 1
 contents-hub --vault ~/contents-vault interaction handle \
-  --platform telegram \
+  --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
   --kind reaction \

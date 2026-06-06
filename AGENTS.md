@@ -8,7 +8,8 @@ This file guides Codex and other coding agents working in this repository.
 - Skill-first install and CLI fallback: `install.md`
 - Agent operating skill: `skills/contents-hub/SKILL.md`
 - Architecture and runtime boundaries: `docs/architecture.md`,
-  `docs/runtime-matrix.md`, `docs/schedulers.md`, `docs/channels.md`
+  `docs/runtime-matrix.md`, `docs/schedulers.md`, `docs/channels.md`,
+  `docs/launch.md`
 
 When the CLI surface changes, update README, docs, and the relevant skill in
 the same change.

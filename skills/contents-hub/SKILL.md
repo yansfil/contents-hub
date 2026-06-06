@@ -88,6 +88,10 @@ The metadata paths are:
 
 ## Common Commands
 
+Reliable first-launch source paths are RSS feeds and manual URL/text items.
+Treat browser-backed social sources and explorations as optional paths that may
+need manual browser sign-in.
+
 List subscriptions:
 
 ```bash
@@ -269,7 +273,7 @@ Record a sent message:
 
 ```bash
 contents-hub delivery record \
-  --platform telegram \
+  --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
   --payload-type raw_item \
@@ -280,7 +284,7 @@ List mappings:
 
 ```bash
 contents-hub delivery list
-contents-hub delivery list --platform telegram --limit 20
+contents-hub delivery list --platform demo --limit 20
 ```
 
 ## Interactions
@@ -289,7 +293,7 @@ Handle a normalized event:
 
 ```bash
 contents-hub interaction handle \
-  --platform telegram \
+  --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
   --user-id demo-user \
@@ -301,7 +305,7 @@ contents-hub interaction handle \
 Or pass the event as JSON:
 
 ```bash
-contents-hub interaction handle --event-json '{"platform":"telegram","channel_id":"demo-channel","message_id":"demo-message","user_id":"demo-user","kind":"reaction","value":"⭐"}' --format json
+contents-hub interaction handle --event-json '{"platform":"demo","channel_id":"demo-channel","message_id":"demo-message","user_id":"demo-user","kind":"reaction","value":"⭐"}' --format json
 ```
 
 Inspect rules:
@@ -331,6 +335,8 @@ should:
 5. call `interaction handle --event-json ... --format json`
 
 Core contents-hub should not import channel SDKs during base import.
+Do not claim built-in Telegram, Slack, or Discord bot packages unless such an
+external adapter package is explicitly installed.
 
 ## Runner Selection
 

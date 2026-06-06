@@ -3,6 +3,10 @@
 Channel adapters are thin. They translate between a messaging platform and the
 contents-hub CLI contract.
 
+contents-hub does not ship built-in Telegram, Slack, or Discord bot packages in
+the base install. External gateways own message transport, credentials,
+webhooks, and platform SDKs.
+
 ## Delivery
 
 ```bash
@@ -20,7 +24,7 @@ After sending a card, record the returned platform message id:
 
 ```bash
 contents-hub --vault ~/contents-vault delivery record \
-  --platform telegram \
+  --platform demo \
   --channel-id <channel> \
   --message-id <message> \
   --payload-type raw_item \
@@ -33,7 +37,7 @@ Adapters normalize platform events to:
 
 ```json
 {
-  "platform": "telegram",
+  "platform": "demo",
   "event_id": "event-1",
   "workspace_id": "",
   "channel_id": "channel-1",
@@ -63,7 +67,7 @@ Default rules:
 
 ## Reference Integrations
 
-- Telegram/Hermes: working reference shape using `delivery record` and
+- Telegram/Hermes: reference integration shape using `delivery record` and
   `interaction handle`.
 - Slack and Discord: fixture normalizers in `contents_hub.channels` prove the
   shared event shape without requiring SDKs in the base install.

@@ -93,6 +93,8 @@ contents-hub --vault "$HOME/other-vault" sub list
 
 ## 4. Add Content
 
+RSS feeds and manual URL/text are the reliable first-launch source paths.
+
 Add a subscription:
 
 ```bash
@@ -109,6 +111,8 @@ contents-hub raw add "A pasted note" --title "Manual note"
 
 URL input is canonicalized and deduped. contents-hub tries static HTTP
 extraction first and uses the selected browser/agent runner only when needed.
+Browser-backed social sources and explorations are optional paths and may
+require a signed-in browser profile.
 
 ## 5. Fetch, Digest, And View
 
@@ -156,16 +160,19 @@ for the skill-first workflow.
 
 ## 8. Delivery And Interaction Smoke
 
+This smoke uses a demo platform. Real Telegram, Slack, or Discord transport
+belongs in an external gateway or agent runtime.
+
 ```bash
 contents-hub deliver pending --format json
 contents-hub delivery record \
-  --platform telegram \
+  --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
   --payload-type raw_item \
   --raw-item-id 1
 contents-hub interaction handle \
-  --platform telegram \
+  --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
   --kind reaction \
@@ -173,5 +180,5 @@ contents-hub interaction handle \
   --format json
 ```
 
-Adapters can use the same shape for Slack, Discord, Hermes, OpenClaw, or any
-other gateway.
+Adapters can use the same shape for Telegram, Slack, Discord, Hermes, OpenClaw,
+or any other gateway.

@@ -9,9 +9,32 @@ it from plain cron, launchd, Hermes, OpenClaw, Claude Code, Codex, or another
 loop. The runtime owns scheduling and channel transport; contents-hub owns the
 content state and actions.
 
+## Launch Maturity
+
+Reliable first-launch path:
+
+- Install the single `contents-hub` skill.
+- Let the agent install the local CLI from this repo.
+- Initialize a vault.
+- Add RSS feeds or manual URL/text items.
+- Run `fetch-all`, `digest`, and the dashboard.
+
+Optional or experimental paths:
+
+- Browser-backed sources such as X, LinkedIn, Threads, and arbitrary web pages.
+- Exploration recipes.
+- External channel delivery through Telegram, Slack, Discord, Hermes, OpenClaw,
+  or another gateway.
+
+contents-hub does not ship built-in Slack, Discord, or Telegram bot packages in
+the base install. External gateways send messages and call the contents-hub CLI
+contract.
+
 ## Features
 
-- Subscribe to RSS, YouTube, web, and browser/agent-backed sources.
+- Subscribe to RSS feeds and add manual URL/text items for the reliable first
+  launch path.
+- Try YouTube, web, and browser/agent-backed sources as optional paths.
 - Add ad-hoc read-later URLs or text with `raw add`.
 - Route raw items through Lenses and produce digest notes.
 - Promote saved raw items into immutable `sources/*.md` notes.
@@ -20,8 +43,8 @@ content state and actions.
 - Generate adapter-ready delivery payloads with `deliver pending`.
 - Record outbound message ids with `delivery record`.
 - Handle normalized reactions with `interaction handle`.
-- Use Telegram/Hermes as a working reference path and Slack/Discord fixtures as
-  channel contract examples.
+- Use Telegram/Hermes as a reference integration shape and Slack/Discord
+  fixtures as channel contract examples.
 
 ## Product Concepts
 
@@ -139,6 +162,7 @@ contents-hub web
 - [Schedulers](docs/schedulers.md)
 - [Channels](docs/channels.md)
 - [Initialization](docs/initialization.md)
+- [Launch Checklist](docs/launch.md)
 
 ## License
 

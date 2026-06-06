@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOTS = [
     "README.md",
+    "RELEASE_NOTES.md",
     "AGENTS.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
@@ -77,3 +78,25 @@ def test_public_surface_does_not_contain_private_paths_or_secret_literals():
             if token in text:
                 offenders.append(f"{path.relative_to(ROOT)}: {token}")
     assert offenders == []
+
+
+def test_public_skill_surface_is_single_contents_hub_skill():
+    skill_files = sorted((ROOT / "skills").glob("*/SKILL.md"))
+    assert [path.relative_to(ROOT).as_posix() for path in skill_files] == [
+        "skills/contents-hub/SKILL.md"
+    ]
+
+
+def test_launch_docs_keep_first_success_and_followups_clear():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    install = (ROOT / "install.md").read_text(encoding="utf-8")
+    quickstart = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
+    channels = (ROOT / "docs" / "channels.md").read_text(encoding="utf-8")
+    launch = (ROOT / "docs" / "launch.md").read_text(encoding="utf-8")
+
+    assert "Reliable first-launch path" in readme
+    assert "RSS/manual content" in install
+    assert "RSS and manual URL/text are the reliable first-launch path" in quickstart
+    assert "does not ship built-in Telegram, Slack, or Discord bot packages" in channels
+    assert "platform demo" in launch
+    assert "contents-hub-explore" not in readme + install + quickstart + channels + launch

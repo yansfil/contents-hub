@@ -12,6 +12,10 @@ the agent to install, initialize, subscribe, fetch, digest, deliver, or handle
 interactions. The skill contains the CLI install and operating playbook, and the
 actual product behavior lives in the `contents-hub` CLI.
 
+The reliable first launch path is RSS/manual content, local digest generation,
+and the dashboard. Browser-backed social sources, explorations, and real
+Telegram/Slack/Discord bot adapters are optional or follow-up paths.
+
 ## Recommended: Skill-First
 
 Use your agent runtime's skill installer and point it at:

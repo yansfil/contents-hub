@@ -3,6 +3,12 @@
 contents-hub does not need to own scheduling. Any runtime that can run commands
 can drive it.
 
+Daily digest automation is scheduled CLI execution. A runtime such as cron,
+launchd, Hermes, OpenClaw, Claude Code, or Codex should run
+`contents-hub fetch-all` and then `contents-hub digest` on its own schedule.
+contents-hub stores subscriptions, raw items, and digest rows; the runtime owns
+the clock.
+
 ## Common Commands
 
 ```bash
