@@ -60,7 +60,20 @@ contents-hub --vault ~/contents-vault web --port 8585
 
 Then open `http://localhost:8585`.
 
-## 6. Try Delivery And Interaction
+## 6. Sign In For Browser-Backed Sources
+
+For sites that require login, open the dedicated contents-hub browser profile
+and sign in manually:
+
+```bash
+contents-hub browser open https://x.com/login
+contents-hub browser status
+```
+
+contents-hub does not store credentials. Browser cookies stay inside the
+chromux Chrome profile.
+
+## 7. Try Delivery And Interaction
 
 ```bash
 contents-hub --vault ~/contents-vault deliver pending --format json

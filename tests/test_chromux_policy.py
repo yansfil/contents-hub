@@ -26,6 +26,7 @@ from contents_hub.db import init_db
 from contents_hub.models import ListFetchResult
 from contents_hub.subscriptions import SubscriptionStore
 from contents_hub.web.app import create_app
+from contents_hub.cli import main
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -810,3 +811,105 @@ def test_settings_resume_background_kills_foreground_profile(vault, monkeypatch)
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "killed"
+
+
+def test_browser_status_cli_reports_contents_hub_profile(vault, monkeypatch, capsys):
+    monkeypatch.chdir(vault.vault_path)
+    monkeypatch.setattr(
+        "contents_hub.chromux.chromux_profile_state",
+        lambda profile=None: "not_running",
+    )
+
+    rc = main(["browser", "status", "--json"])
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "profile": "contents-hub",
+        "state": "not_running",
+    }
+
+
+def test_browser_open_cli_uses_contents_hub_profile(vault, monkeypatch, capsys):
+    monkeypatch.chdir(vault.vault_path)
+    calls: list[dict[str, object]] = []
+
+    def fake_open(url, *, session=None, confirmed=False, profile=None):
+        calls.append(
+            {
+                "url": url,
+                "session": session,
+                "confirmed": confirmed,
+                "profile": profile,
+            }
+        )
+        return {
+            "status": "opened",
+            "url": url,
+            "previous_state": "not_running",
+            "error": None,
+        }
+
+    monkeypatch.setattr("contents_hub.chromux.open_chromux_headed", fake_open)
+
+    rc = main(["browser", "open", "https://x.com/login", "--json"])
+
+    assert rc == 0
+    assert calls == [
+        {
+            "url": "https://x.com/login",
+            "session": "contents-hub",
+            "confirmed": False,
+            "profile": "contents-hub",
+        }
+    ]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["profile"] == "contents-hub"
+    assert payload["status"] == "opened"
+
+
+def test_browser_open_cli_requires_confirm_for_headless_switch(
+    vault, monkeypatch, capsys
+):
+    monkeypatch.chdir(vault.vault_path)
+
+    def fake_open(url, *, session=None, confirmed=False, profile=None):
+        assert profile == "contents-hub"
+        assert confirmed is False
+        return {
+            "status": "needs_confirm",
+            "url": url,
+            "previous_state": "headless",
+            "error": "Background browser work is running",
+        }
+
+    monkeypatch.setattr("contents_hub.chromux.open_chromux_headed", fake_open)
+
+    rc = main(["browser", "open", "https://linkedin.com/login", "--json"])
+
+    assert rc == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["profile"] == "contents-hub"
+    assert payload["status"] == "needs_confirm"
+
+
+def test_browser_kill_cli_uses_contents_hub_profile(vault, monkeypatch, capsys):
+    monkeypatch.chdir(vault.vault_path)
+    calls: list[str | None] = []
+
+    def fake_kill(profile=None):
+        calls.append(profile)
+        return {"status": "killed", "previous_state": "headed", "error": None}
+
+    monkeypatch.setattr("contents_hub.chromux.kill_chromux_profile", fake_kill)
+
+    rc = main(["browser", "kill", "--json"])
+
+    assert rc == 0
+    assert calls == ["contents-hub"]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["profile"] == "contents-hub"
+    assert payload["status"] == "killed"

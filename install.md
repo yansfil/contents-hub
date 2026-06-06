@@ -85,6 +85,7 @@ Common runtime commands:
 
 ```bash
 contents-hub --vault "$HOME/contents-vault" sub add https://example.com/feed.xml
+contents-hub --vault "$HOME/contents-vault" browser open https://x.com/login
 contents-hub --vault "$HOME/contents-vault" fetch-all
 contents-hub --vault "$HOME/contents-vault" digest
 contents-hub --vault "$HOME/contents-vault" deliver pending --format json

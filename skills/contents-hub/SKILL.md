@@ -30,6 +30,7 @@ contents-hub fetch --help
 contents-hub fetch-all --help
 contents-hub daemon --help
 contents-hub digest --help
+contents-hub browser --help
 contents-hub deliver pending --help
 contents-hub delivery record --help
 contents-hub interaction handle --help
@@ -142,6 +143,22 @@ contents-hub daemon install
 contents-hub daemon status
 contents-hub daemon uninstall
 ```
+
+## Browser Profile
+
+For login-required browser-backed sources, open the dedicated contents-hub
+browser profile and let the user sign in manually:
+
+```bash
+contents-hub browser open
+contents-hub browser open https://x.com/login
+contents-hub browser status
+contents-hub browser kill
+```
+
+The profile name is fixed to `contents-hub`. Do not ask for site-specific login
+commands; open the requested site and let the user complete authentication in
+Chrome. contents-hub does not store passwords or tokens.
 
 Launch the dashboard:
 

@@ -74,6 +74,17 @@ contents-hub fetch-all
 contents-hub digest
 ```
 
+For login-required browser-backed sources, open the dedicated browser profile
+and sign in manually:
+
+```bash
+contents-hub browser open https://x.com/login
+contents-hub browser status
+```
+
+The browser profile is named `contents-hub`. contents-hub does not store
+passwords or tokens.
+
 Use `--vault` when you intentionally want another vault:
 
 ```bash

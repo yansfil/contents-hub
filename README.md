@@ -16,6 +16,7 @@ content state and actions.
 - Route raw items through Lenses and produce digest notes.
 - Promote saved raw items into immutable `sources/*.md` notes.
 - Run a FastAPI dashboard for subscriptions, digests, saved items, and inboxes.
+- Open the dedicated `contents-hub` browser profile for manual sign-in.
 - Generate adapter-ready delivery payloads with `deliver pending`.
 - Record outbound message ids with `delivery record`.
 - Handle normalized reactions with `interaction handle`.
@@ -123,6 +124,7 @@ contents-hub digest
 contents-hub lens create|list|update|delete
 contents-hub explore
 contents-hub exploration add|list|run|run-all|delete
+contents-hub browser open|status|kill
 contents-hub deliver pending
 contents-hub delivery record|list
 contents-hub interaction handle|rules list

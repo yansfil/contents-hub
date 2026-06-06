@@ -2,7 +2,7 @@
 
 | Runtime | Owns | contents-hub commands |
 | --- | --- | --- |
-| Manual shell | Human-triggered runs | `fetch-all`, `digest`, `web` |
+| Manual shell | Human-triggered runs | `browser open`, `fetch-all`, `digest`, `web` |
 | cron | Schedule | `fetch-all`, `digest`, `exploration run-all`, `deliver pending` |
 | macOS launchd | Long-running daemon | `daemon loop` |
 | Hermes | Schedule and Telegram gateway | `fetch-all`, `digest`, `deliver pending`, `delivery record`, `interaction handle` |

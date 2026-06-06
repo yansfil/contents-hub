@@ -55,6 +55,8 @@ Single test:
 - `fetch-all` - fetch every active or error subscription
 - `tick` - collect due subscriptions
 - `daemon {run,loop,install,uninstall,status}` - background collector
+- `browser {open,status,kill}` - open or inspect the fixed contents-hub browser
+  profile for manual sign-in
 - `digest` - one-shot DB-backed digest generation
 - `lens {create,list,update,delete}` - Lens definitions
 - `explore` and `exploration {add,list,run,run-all,delete}` - exploration

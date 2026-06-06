@@ -12,6 +12,7 @@ Subcommands:
     daemon {run,loop,install,uninstall,status} — background collector (text default, --json optional)
     web                                        — launch FastAPI dashboard
     init                                       — scaffold a new vault
+    browser {open,status,kill}                 — manage the contents-hub browser profile
 
 Designed to be thin: every command delegates to ``contents_hub.api`` or the
 relevant module.
@@ -159,6 +160,32 @@ def _build_daemon_parser(sub_parsers) -> None:
 def _build_web_parser(sub_parsers) -> None:
     web_p = sub_parsers.add_parser("web", help="Launch the web dashboard")
     web_p.add_argument("--port", type=int, default=8585)
+
+
+def _build_browser_parser(sub_parsers) -> None:
+    browser_p = sub_parsers.add_parser(
+        "browser",
+        help="Open or inspect the contents-hub browser profile",
+    )
+    browser_sub = browser_p.add_subparsers(dest="browser_command", required=True)
+
+    open_p = browser_sub.add_parser(
+        "open",
+        help="Open the contents-hub browser profile for manual sign-in",
+    )
+    open_p.add_argument("url", nargs="?", default=None, help="Optional URL to open")
+    open_p.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Allow stopping a headless background profile before opening Chrome",
+    )
+    open_p.add_argument("--json", action="store_true", dest="json_output")
+
+    status_p = browser_sub.add_parser("status", help="Show browser profile status")
+    status_p.add_argument("--json", action="store_true", dest="json_output")
+
+    kill_p = browser_sub.add_parser("kill", help="Stop the contents-hub browser profile")
+    kill_p.add_argument("--json", action="store_true", dest="json_output")
 
 
 def _build_init_parser(sub_parsers) -> None:
@@ -433,6 +460,7 @@ def build_parser() -> argparse.ArgumentParser:
     _build_raw_parser(sub)
     _build_daemon_parser(sub)
     _build_web_parser(sub)
+    _build_browser_parser(sub)
     _build_init_parser(sub)
     _build_digest_parser(sub)
     _build_delivery_parser(sub)
@@ -1518,6 +1546,75 @@ def _handle_web(config, args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Browser handler
+# ---------------------------------------------------------------------------
+
+
+def _print_browser_result(payload: dict[str, Any], *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    status = payload.get("status", "unknown")
+    profile = payload.get("profile") or "contents-hub"
+    if payload.get("error"):
+        print(f"browser {status}: {payload['error']}")
+        return
+    if "state" in payload:
+        print(f"browser profile {profile}: {payload['state']}")
+        return
+    if payload.get("url"):
+        print(f"browser {status}: {payload['url']} (profile: {profile})")
+        return
+    print(f"browser {status} (profile: {profile})")
+
+
+def _handle_browser(config, args) -> int:
+    from contents_hub.chromux import (
+        CHROMUX_PROFILE_NAME,
+        chromux_profile_state,
+        kill_chromux_profile,
+        open_chromux_headed,
+    )
+
+    cmd = args.browser_command
+    json_output = bool(getattr(args, "json_output", False))
+    profile = CHROMUX_PROFILE_NAME
+
+    if cmd == "status":
+        payload = {
+            "ok": True,
+            "profile": profile,
+            "state": chromux_profile_state(profile),
+        }
+        _print_browser_result(payload, json_output=json_output)
+        return 0
+
+    if cmd == "open":
+        payload = open_chromux_headed(
+            getattr(args, "url", None),
+            session="contents-hub",
+            confirmed=bool(getattr(args, "confirm", False)),
+            profile=profile,
+        )
+        payload = {
+            "ok": payload.get("status") not in {"error", "needs_confirm"},
+            "profile": profile,
+            **payload,
+        }
+        _print_browser_result(payload, json_output=json_output)
+        return 0 if payload.get("ok") and payload.get("status") != "needs_confirm" else 1
+
+    if cmd == "kill":
+        payload = kill_chromux_profile(profile)
+        payload = {"ok": payload.get("status") != "error", "profile": profile, **payload}
+        _print_browser_result(payload, json_output=json_output)
+        return 0 if payload.get("ok") else 1
+
+    return 1
+
+
+# ---------------------------------------------------------------------------
 # Init handler
 # ---------------------------------------------------------------------------
 
@@ -1625,6 +1722,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "delivery",
         "interaction",
         "deliver",
+        "browser",
     ) or (
         args.command == "sub" and getattr(args, "sub_command", "") == "add"
     )
@@ -1656,6 +1754,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _handle_daemon(config, args)
     if args.command == "web":
         return _handle_web(config, args)
+    if args.command == "browser":
+        return _handle_browser(config, args)
     if args.command == "digest":
         return _handle_digest(config, args)
 
