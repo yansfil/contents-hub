@@ -5,8 +5,8 @@ vault, and make repo-outside commands target the same vault.
 
 ## 1. Install The CLI
 
-For agent-operated setup, use the one-pass install contract in `install.md`.
-It installs the CLI, registers skills for common agent runtimes, and runs smoke
+For agent-operated setup, install the single `contents-hub` skill first. The
+skill tells the agent how to install the CLI, initialize a vault, and run smoke
 tests.
 
 From a checkout:
@@ -135,13 +135,13 @@ Codex loop examples.
 
 ## 7. Agent Skill Installation
 
-Agent skill registration is optional. The repo ships:
+Agent skill registration is optional but recommended. The repo ships one skill:
 
-- `skills/contents-hub/SKILL.md` for CLI and vault operations
-- `skills/contents-hub-explore/SKILL.md` for exploration recipe design
+- `skills/contents-hub/SKILL.md` for CLI, vault, subscription, exploration,
+  digest, delivery, and interaction operations
 
-Codex should copy `SKILL.md` files as real files. Claude Code and Hermes can
-symlink the individual files. See `install.md` for exact commands.
+Use your runtime's skill installer to register that one skill. See `install.md`
+for the skill-first workflow.
 
 ## 8. Delivery And Interaction Smoke
 

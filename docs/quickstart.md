@@ -4,11 +4,9 @@
 
 Agent install:
 
-```bash
-curl -L https://raw.githubusercontent.com/yansfil/contents-hub/main/install.md \
-  -o /tmp/contents-hub-install.md
-# Run the "One-Pass Agent Setup" block from install.md.
-```
+Install the single `contents-hub` skill in your agent runtime, then ask the
+agent to install the CLI and initialize a vault. See `install.md` for the
+skill-first contract.
 
 Manual install:
 
@@ -79,5 +77,4 @@ contents-hub --vault ~/contents-vault interaction handle \
   --value "⭐"
 ```
 
-See `install.md` for Codex, Claude Code, Hermes, and generic agent skill
-registration.
+See `install.md` for skill-first setup and generic runtime integration.

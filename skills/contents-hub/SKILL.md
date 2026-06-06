@@ -14,9 +14,9 @@ metadata:
 Use this skill for practical `contents-hub` CLI and vault operations. Prefer
 current command help and concrete commands over memory.
 
-For exploration design sessions that require user interview, direct `chromux`
-probing, lesson learning, and final recipe output, use
-`skills/contents-hub-explore/SKILL.md` and the exploration references.
+This skill is intentionally self-contained. If the CLI is not installed,
+install it from the public repo, then use the CLI for all operations. Do not
+require a second contents-hub skill for exploration design.
 
 ## First Check
 
@@ -35,14 +35,29 @@ contents-hub delivery record --help
 contents-hub interaction handle --help
 ```
 
-If the command is missing, install from the current repository checkout:
+If the command is missing, install or update a durable checkout:
 
 ```bash
+INSTALL_DIR="${CONTENTS_HUB_DIR:-$HOME/contents-hub}"
+REPO_URL="https://github.com/yansfil/contents-hub"
+
+if [ -d "$INSTALL_DIR/.git" ]; then
+  cd "$INSTALL_DIR"
+  git pull --ff-only
+else
+  mkdir -p "$(dirname "$INSTALL_DIR")"
+  git clone "$REPO_URL" "$INSTALL_DIR"
+  cd "$INSTALL_DIR"
+fi
+
 uv sync --all-extras
 uv tool install -e "$PWD" --force
 uv tool update-shell
 contents-hub --help
 ```
+
+If the checkout has uncommitted changes, stop and report the dirty files
+instead of overwriting them.
 
 ## Vault Targeting
 
@@ -192,7 +207,33 @@ contents-hub exploration run-all --timeout-per-exploration 600
 ```
 
 Explorations are foreground/manual runs unless an external scheduler invokes
-them. Design and approval of recipes belongs in the exploration skill.
+them.
+
+When designing a new exploration, keep the workflow lightweight:
+
+1. Clarify target surfaces, recency, ranking signals, and skip rules.
+2. Probe important browser surfaces with `chromux` when available.
+3. Produce a small `recipe.yaml` with `goal`, `keep`, `skip`, `sources`, and
+   optional `runtime` limits.
+4. Show the recipe summary before registering it.
+5. Do not run `exploration add`, `exploration run`, or `exploration run-all`
+   until the user explicitly confirms persistence or execution.
+
+Minimal recipe shape:
+
+```yaml
+goal: Collect useful raw_items for the request.
+keep:
+  - Concrete item rule.
+skip:
+  - Explicit exclusion.
+sources:
+  - surface: web
+    search: "agent workflow examples"
+runtime:
+  max_minutes: 10
+  target_items: 12
+```
 
 ## Delivery Payloads
 

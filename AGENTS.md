@@ -5,9 +5,8 @@ This file guides Codex and other coding agents working in this repository.
 ## Operational Docs
 
 - Public setup and vault targeting: `docs/initialization.md`
-- Install and skill registration: `install.md`
-- CLI/vault skill: `skills/contents-hub/SKILL.md`
-- Exploration recipe skill: `skills/contents-hub-explore/SKILL.md`
+- Skill-first install and CLI fallback: `install.md`
+- Agent operating skill: `skills/contents-hub/SKILL.md`
 - Architecture and runtime boundaries: `docs/architecture.md`,
   `docs/runtime-matrix.md`, `docs/schedulers.md`, `docs/channels.md`
 

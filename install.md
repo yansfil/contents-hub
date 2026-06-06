@@ -1,118 +1,60 @@
 ---
 name: contents-hub-install
-description: Install contents-hub and register its agent skills with Codex, Claude Code, or Hermes.
+description: Install the single contents-hub skill, then let the agent install and operate the contents-hub CLI from that skill.
 ---
 
 # contents-hub Installation
 
-Use this file for CLI installation, vault targeting, daemon setup, and optional
-agent-skill registration. Day-to-day usage lives in
-`skills/contents-hub/SKILL.md`; exploration recipe design lives in
-`skills/contents-hub-explore/SKILL.md`.
+contents-hub is meant to be installed skill-first.
 
-contents-hub is a local-first Python CLI and FastAPI dashboard for collecting
-subscriptions, raw items, digests, delivery mappings, and channel interactions
-into a user-owned vault.
+Install the single `contents-hub` skill in your agent runtime. After that, ask
+the agent to install, initialize, subscribe, fetch, digest, deliver, or handle
+interactions. The skill contains the CLI install and operating playbook, and the
+actual product behavior lives in the `contents-hub` CLI.
 
-## Agent Install Contract
+## Recommended: Skill-First
 
-If you are an AI agent and the user asks you to install contents-hub from this
-file, do the work end to end without asking follow-up questions unless the next
-step requires a user-owned action, such as installing Python, installing `uv`,
-authenticating GitHub, choosing a non-default vault, or resolving uncommitted
-changes in an existing checkout.
+Use your agent runtime's skill installer and point it at:
 
-The default supported install target is macOS/Linux. Prefer a durable checkout
-path such as `$HOME/contents-hub` or `$HOME/team-attention/contents-hub`, not a
-temporary directory.
-
-## Requirements
-
-- Python 3.11+
-- `uv`
-- macOS or Linux for the standard CLI flows
-- Optional: `chromux` plus the `claude` extra for agent/browser-backed
-  collection
-
-## One-Pass Setup
-
-Run this from any directory. It installs or updates a durable checkout, installs
-the CLI, registers the Codex, Claude Code, and Hermes skills, and verifies the
-public command surface.
-
-```bash
-INSTALL_DIR="${CONTENTS_HUB_DIR:-$HOME/contents-hub}"
-REPO_URL="https://github.com/yansfil/contents-hub"
-
-if [ -d "$INSTALL_DIR/.git" ]; then
-  cd "$INSTALL_DIR"
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "contents-hub checkout has uncommitted changes: $INSTALL_DIR" >&2
-    git status --short >&2
-    exit 2
-  fi
-  git pull --ff-only
-else
-  mkdir -p "$(dirname "$INSTALL_DIR")"
-  git clone "$REPO_URL" "$INSTALL_DIR"
-  cd "$INSTALL_DIR"
-fi
-
-uv sync --all-extras
-uv tool install -e "$PWD" --force
-uv tool update-shell
-command -v contents-hub
-contents-hub --help
-python -m contents_hub --help
-
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub"
-[ -L "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md" ] && rm "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md"
-cp "$PWD/skills/contents-hub/SKILL.md" "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md"
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore"
-[ -L "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md" ] && rm "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md"
-cp "$PWD/skills/contents-hub-explore/SKILL.md" "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md"
-
-mkdir -p "$HOME/.claude/skills/contents-hub"
-ln -sf "$PWD/skills/contents-hub/SKILL.md" "$HOME/.claude/skills/contents-hub/SKILL.md"
-mkdir -p "$HOME/.claude/skills/contents-hub-explore"
-ln -sf "$PWD/skills/contents-hub-explore/SKILL.md" "$HOME/.claude/skills/contents-hub-explore/SKILL.md"
-
-mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub"
-ln -sf "$PWD/skills/contents-hub/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub/SKILL.md"
-mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub-explore"
-ln -sf "$PWD/skills/contents-hub-explore/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub-explore/SKILL.md"
-
-CONTENTS_HUB_GUIDE='
-## contents-hub
-
-Use the repo-local contents-hub skills for vault operations, subscriptions,
-digests, delivery payloads, and channel interactions when available.
-'
-
-touch "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
-if ! grep -Fq 'Use the repo-local contents-hub skills' "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"; then
-  printf '\n%s\n' "$CONTENTS_HUB_GUIDE" >> "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
-fi
-
-mkdir -p "$HOME/.claude"
-touch "$HOME/.claude/CLAUDE.md"
-if ! grep -Fq 'Use the repo-local contents-hub skills' "$HOME/.claude/CLAUDE.md"; then
-  printf '\n%s\n' "$CONTENTS_HUB_GUIDE" >> "$HOME/.claude/CLAUDE.md"
-fi
-
-touch "${HERMES_HOME:-$HOME/.hermes}/AGENTS.md"
-if ! grep -Fq 'Use the repo-local contents-hub skills' "${HERMES_HOME:-$HOME/.hermes}/AGENTS.md"; then
-  printf '\n%s\n' "$CONTENTS_HUB_GUIDE" >> "${HERMES_HOME:-$HOME/.hermes}/AGENTS.md"
-fi
+```text
+https://github.com/yansfil/contents-hub
+skills/contents-hub/SKILL.md
 ```
 
-New Codex, Claude Code, or Hermes sessions should then load the two
-contents-hub skills automatically.
+If your runtime supports an `npx skills` style installer, install only the
+`contents-hub` skill from this repo. The exact command depends on that runtime's
+skill installer, but the target is the single `skills/contents-hub/SKILL.md`
+file.
 
-## CLI Setup Only
+Then start a new agent session and ask:
 
-Clone the repo once into a durable location, then install the CLI globally from
-that checkout.
+```text
+Install contents-hub, initialize a vault at ~/contents-vault, and add this RSS feed: https://example.com/feed.xml
+```
+
+The agent should:
+
+1. Read the `contents-hub` skill.
+2. Check whether `contents-hub` is already installed.
+3. Clone or update a durable checkout.
+4. Install the editable CLI with `uv tool install`.
+5. Initialize or reuse the requested vault.
+6. Use CLI commands such as `sub add`, `fetch-all`, `digest`, `deliver pending`,
+   `delivery record`, and `interaction handle`.
+
+## Agent Contract
+
+When an agent has the `contents-hub` skill, it should do the work end to end
+unless a user-owned action is required, such as installing Python, installing
+`uv`, authenticating to GitHub, choosing a vault path, or resolving uncommitted
+changes in an existing checkout.
+
+The default install target is macOS/Linux. Prefer a durable checkout path such
+as `$HOME/contents-hub`, not `/tmp`.
+
+## CLI Install Fallback
+
+If you do not use skills, install the CLI directly:
 
 ```bash
 git clone https://github.com/yansfil/contents-hub "$HOME/contents-hub"
@@ -124,131 +66,35 @@ contents-hub --help
 ```
 
 The base install is runtime-neutral. Claude-backed browser/agent features are
-available through the `claude` optional extra:
+optional:
 
 ```bash
 uv sync --extra claude --extra dev
 CONTENTS_HUB_AGENT_RUNNER=claude-sdk contents-hub --help
 ```
 
-## Vault Targeting
+## Runtime Shape
 
-Every command accepts `--vault PATH`. Resolution order is:
+All runtimes use the same CLI contract.
 
-1. `--vault PATH`
-2. `CONTENTS_HUB_VAULT`
-3. current working directory
+Hermes, OpenClaw, Codex, Claude Code, cron, launchd, Slack, Discord, Telegram,
+or another gateway should own scheduling, credentials, webhooks, and message
+transport. contents-hub owns local state and content actions.
 
-For repo-outside usage, pin the intended vault in your shell profile:
-
-```bash
-export CONTENTS_HUB_VAULT="$HOME/contents-vault"
-```
-
-Initialize a new vault once:
+Common runtime commands:
 
 ```bash
-contents-hub --vault "$HOME/contents-vault" init "$HOME/contents-vault"
-```
-
-New vault metadata uses `.contents-hub/` and `.contents-hub.yaml`.
-
-## Register Agent Skills
-
-This repo ships two independent skills:
-
-- `contents-hub`: practical CLI and vault operations
-- `contents-hub-explore`: exploration design, chromux probing, recipe writing,
-  and explicit confirmation before persistent registration or runs
-
-Register both when possible. Register only `contents-hub` if the runtime should
-manage subscriptions and daemon tasks but never design explorations.
-
-OpenClaw or another agent runtime can use the same contract: install the
-`contents-hub` CLI globally, copy or symlink the two `SKILL.md` files into that
-runtime's global skill directory, and add a short global instruction pointing
-agents to those skills.
-
-### Codex
-
-Copy both files as real files under `$CODEX_HOME/skills/`, usually
-`~/.codex/skills/`.
-
-```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub"
-cp "$PWD/skills/contents-hub/SKILL.md" "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md"
-
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore"
-cp "$PWD/skills/contents-hub-explore/SKILL.md" "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md"
-```
-
-### Claude Code
-
-Symlink both files under `~/.claude/skills/`.
-
-```bash
-mkdir -p "$HOME/.claude/skills/contents-hub"
-ln -sf "$PWD/skills/contents-hub/SKILL.md" "$HOME/.claude/skills/contents-hub/SKILL.md"
-
-mkdir -p "$HOME/.claude/skills/contents-hub-explore"
-ln -sf "$PWD/skills/contents-hub-explore/SKILL.md" "$HOME/.claude/skills/contents-hub-explore/SKILL.md"
-```
-
-### Hermes
-
-Symlink both files under `$HERMES_HOME/skills/`, usually `~/.hermes/skills/`.
-
-```bash
-mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub"
-ln -sf "$PWD/skills/contents-hub/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub/SKILL.md"
-
-mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub-explore"
-ln -sf "$PWD/skills/contents-hub-explore/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub-explore/SKILL.md"
-```
-
-Avoid symlinking a runtime skill directory to the repo skill directory and then
-writing `SKILL.md` through that path. Copy or symlink only the `SKILL.md` file.
-
-## Background Fetch
-
-The fetch loop can be installed as a macOS launchd daemon:
-
-```bash
-contents-hub --vault "$HOME/contents-vault" daemon install
-contents-hub --vault "$HOME/contents-vault" daemon status
-```
-
-Digest generation is a separate one-shot command unless another scheduler
-invokes it:
-
-```bash
-contents-hub --vault "$HOME/contents-vault" digest
-```
-
-Any scheduler that can run shell commands can also call:
-
-```bash
+contents-hub --vault "$HOME/contents-vault" sub add https://example.com/feed.xml
 contents-hub --vault "$HOME/contents-vault" fetch-all
+contents-hub --vault "$HOME/contents-vault" digest
 contents-hub --vault "$HOME/contents-vault" deliver pending --format json
+contents-hub --vault "$HOME/contents-vault" delivery record ...
 contents-hub --vault "$HOME/contents-vault" interaction handle --event-json '<json>'
 ```
 
 ## Smoke Test
 
 Run this after installing or updating:
-
-```bash
-contents-hub --help
-python -m contents_hub --help
-contents-hub sub --help
-contents-hub raw add --help
-contents-hub deliver pending --help
-contents-hub delivery record --help
-contents-hub interaction handle --help
-contents-hub daemon --help
-```
-
-For a deeper local smoke that does not require credentials:
 
 ```bash
 VAULT="$(mktemp -d)/vault"
@@ -271,43 +117,17 @@ contents-hub --vault "$VAULT" interaction handle \
   --format json
 ```
 
-Expected result: the CLI prints help, creates a vault, creates a digest, emits
-delivery JSON, records a demo message mapping, and handles the reaction without
-requiring provider credentials.
+Expected result: the CLI creates a vault, accepts a raw item, produces a
+runtime-neutral digest response, emits delivery JSON, records a demo outbound
+message, and handles the reaction without provider credentials.
 
-## Verify Installed Skills
+## What To Install
 
-Codex:
+Install one skill:
 
-```bash
-ls -l "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md"
-test ! -L "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub/SKILL.md"
-ls -l "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md"
-test ! -L "${CODEX_HOME:-$HOME/.codex}/skills/contents-hub-explore/SKILL.md"
-grep -n 'Use the repo-local contents-hub skills' "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
+```text
+contents-hub
 ```
 
-Claude Code:
-
-```bash
-ls -l "$HOME/.claude/skills/contents-hub/SKILL.md"
-ls -l "$HOME/.claude/skills/contents-hub-explore/SKILL.md"
-grep -n 'Use the repo-local contents-hub skills' "$HOME/.claude/CLAUDE.md"
-```
-
-Hermes:
-
-```bash
-ls -l "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub/SKILL.md"
-ls -l "${HERMES_HOME:-$HOME/.hermes}/skills/contents-hub-explore/SKILL.md"
-grep -n 'Use the repo-local contents-hub skills' "${HERMES_HOME:-$HOME/.hermes}/AGENTS.md"
-```
-
-## Maintenance Notes
-
-- When CLI behavior changes, update `README.md`, `docs/`, and
-  `skills/contents-hub/SKILL.md`.
-- When the exploration design lifecycle changes, update
-  `skills/contents-hub-explore/SKILL.md`.
-- When install paths, runtime registration, editable install behavior, or vault
-  targeting changes, update this file and `docs/initialization.md`.
+Do not install another contents-hub skill for exploration. Recipe design lives
+inside the same `contents-hub` skill, and execution happens through the CLI.

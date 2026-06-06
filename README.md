@@ -38,15 +38,12 @@ content state and actions.
 
 ## Install
 
-Agent-friendly one-pass install:
+Recommended: install the single `contents-hub` skill in your agent runtime,
+then ask the agent to install the CLI and initialize a vault. The skill points
+the agent at the public repo, installs the CLI when needed, and uses CLI
+commands for all product behavior.
 
-```bash
-curl -L https://raw.githubusercontent.com/yansfil/contents-hub/main/install.md \
-  -o /tmp/contents-hub-install.md
-# Then run the "One-Pass Agent Setup" block from install.md.
-```
-
-Manual install:
+Manual CLI install:
 
 ```bash
 git clone https://github.com/yansfil/contents-hub
@@ -70,21 +67,19 @@ uv sync --extra claude --extra dev
 CONTENTS_HUB_AGENT_RUNNER=claude-sdk contents-hub --help
 ```
 
-See [install.md](install.md) for the full agent install contract, skill
-registration for Codex, Claude Code, and Hermes, and smoke tests.
+See [install.md](install.md) for the skill-first install contract, CLI fallback,
+runtime shape, and smoke tests.
 
 ## Agent Skills
 
-contents-hub ships repo-local skills so coding agents can install the CLI, pick
+contents-hub ships one repo-local skill so coding agents can install the CLI, pick
 the correct vault, add subscriptions, fetch content, design explorations, run
 digests, and wire channel interactions without re-reading the whole codebase.
 
-- [install.md](install.md) - one-pass setup, skill registration, smoke tests,
-  and troubleshooting
-- [skills/contents-hub/SKILL.md](skills/contents-hub/SKILL.md) - day-to-day
-  CLI and vault operations
-- [skills/contents-hub-explore/SKILL.md](skills/contents-hub-explore/SKILL.md)
-  - exploration recipe design with chromux probing
+- [install.md](install.md) - skill-first setup, CLI fallback, smoke tests, and
+  runtime shape
+- [skills/contents-hub/SKILL.md](skills/contents-hub/SKILL.md) - CLI, vault,
+  subscription, exploration, digest, delivery, and interaction operations
 - [AGENTS.md](AGENTS.md) - repository guidance for coding agents
 
 Use `chromux` for browser-backed exploration when it is available. contents-hub
