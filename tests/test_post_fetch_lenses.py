@@ -182,6 +182,53 @@ def test_fetch_subscription_records_enabled_default_lens_matches_for_new_items(
     ]
 
 
+def test_post_fetch_lens_records_exact_keyword_match_without_model_match(tmp_path):
+    cfg = _cfg(tmp_path)
+    _seed_lens(cfg, "smoke", keywords=["Smoke"])
+    store = SubscriptionStore(cfg)
+    sub = store.add(
+        url="https://example.com/feed.xml",
+        title="Example Feed",
+        source_type="rss.feed",
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
+        conn.execute(
+            """INSERT INTO raw_items
+               (url, title, body, origin, priority, status, subscription_id,
+                content_summary, metadata_json, published_at, collected_at, updated_at)
+               VALUES (?, ?, ?, 'subscription', 0, 'raw', ?, ?, '{}', ?, ?, ?)""",
+            (
+                "https://example.com/smoke",
+                "Smoke RSS Item",
+                "Smoke RSS item body for first launch.",
+                int(sub.id),
+                "Smoke RSS item body for first launch.",
+                now,
+                now,
+                now,
+            ),
+        )
+        raw_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+
+    runner = _SequenceRunner(['{"matches": []}'])
+    original = get_default_runner()
+    try:
+        set_default_runner(runner)  # type: ignore[arg-type]
+        inserted = asyncio.run(evaluate_post_fetch_lenses(cfg, int(sub.id), [raw_id]))
+    finally:
+        set_default_runner(original)
+
+    assert inserted == 1
+    with sqlite3.connect(cfg.meta_path / "state.db") as conn:
+        row = conn.execute(
+            "SELECT lens_id, summary FROM raw_item_lenses WHERE raw_item_id = ?",
+            (raw_id,),
+        ).fetchone()
+    assert row == ("smoke", "Smoke RSS item body for first launch.")
+
+
 def test_collect_all_due_records_lenses_for_new_items_without_changing_tick_counts(
     tmp_path,
 ):

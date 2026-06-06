@@ -694,8 +694,11 @@ async def _classify_and_summarize_lens(
         payload,
         render_prompt=lambda chunk: _classify_prompt(criteria=criteria, payload=chunk),
     )
-    fallback_summaries: dict[int, tuple[str, tuple[str, ...], dict[str, Any]]] = {}
     items_by_id = {item.id: item for item in items}
+    keyword_items = [item for item in items if _keyword_matches(lens, item)]
+    fallback_summaries: dict[int, tuple[str, tuple[str, ...], dict[str, Any]]] = (
+        _fallback_payload_summaries(keyword_items)
+    )
     for chunk in chunks:
         prompt = _classify_prompt(criteria=criteria, payload=chunk)
         try:
@@ -710,17 +713,17 @@ async def _classify_and_summarize_lens(
                 raw_id = entry.get("id")
                 if isinstance(raw_id, int):
                     chunk_ids.add(raw_id)
-            keyword_items = [
+            timeout_keyword_items = [
                 item
                 for item_id, item in items_by_id.items()
                 if item_id in chunk_ids and _keyword_matches(lens, item)
             ]
-            if keyword_items:
-                fallback_summaries.update(_fallback_payload_summaries(keyword_items))
+            if timeout_keyword_items:
+                fallback_summaries.update(_fallback_payload_summaries(timeout_keyword_items))
             logger.warning(
                 "Lens classifier timed out for lens %s; keyword fallback matched %s/%s items",
                 lens.id,
-                len(keyword_items),
+                len(timeout_keyword_items),
                 len(chunk),
             )
             continue
