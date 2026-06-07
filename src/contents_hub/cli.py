@@ -10,6 +10,7 @@ Subcommands:
     lens {create,list,update,delete}           — manage Lens definitions
     raw add <url_or_text>                      — manually insert raw items
     daemon {run,loop,install,uninstall,status} — background collector (text default, --json optional)
+    deliver {pending,prepare}                  — adapter-ready delivery cards
     web                                        — launch FastAPI dashboard
     init                                       — scaffold a new vault
     browser {open,status,kill}                 — manage the contents-hub browser profile
@@ -253,9 +254,52 @@ def _build_deliver_parser(sub_parsers) -> None:
     deliver_sub = deliver_p.add_subparsers(dest="deliver_command", required=True)
 
     pending_p = deliver_sub.add_parser("pending", help="Emit pending raw item or digest cards")
-    pending_p.add_argument("--format", dest="output_format", default="json", choices=["json"])
-    pending_p.add_argument("--payload-type", default="all", choices=["all", "raw_item", "digest"])
-    pending_p.add_argument("--limit", type=int, default=20)
+    _add_deliver_payload_args(pending_p)
+
+    prepare_p = deliver_sub.add_parser(
+        "prepare",
+        help="Optionally collect, then emit pending raw item or digest cards",
+    )
+    _add_deliver_payload_args(prepare_p)
+    prepare_p.add_argument(
+        "--collect",
+        default="none",
+        choices=["none", "fetch-all", "tick"],
+        help="Collector to run before selecting delivery cards (default: none)",
+    )
+    prepare_p.add_argument(
+        "--timeout-per-sub",
+        type=float,
+        default=120.0,
+        help="Seconds before one collected subscription times out (default: 120)",
+    )
+    prepare_p.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Maximum subscriptions to fetch concurrently for --collect fetch-all (default: 1)",
+    )
+
+
+def _add_deliver_payload_args(parser) -> None:
+    parser.add_argument("--format", dest="output_format", default="json", choices=["json"])
+    parser.add_argument("--payload-type", default="all", choices=["all", "raw_item", "digest"])
+    parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument(
+        "--origin",
+        default=None,
+        help="Raw item origin filter, e.g. subscription",
+    )
+    parser.add_argument(
+        "--lens-matched",
+        action="store_true",
+        help="Only include raw items matched to at least one Lens",
+    )
+    parser.add_argument(
+        "--first-seen-only",
+        action="store_true",
+        help="Suppress newer raw item rows whose URL appeared earlier",
+    )
 
 
 def _build_raw_parser(sub_parsers) -> None:
@@ -1426,7 +1470,7 @@ def _handle_interaction(config, args) -> int:
 
 
 def _handle_deliver(config, args) -> int:
-    from contents_hub.delivery import pending_delivery_payload
+    from contents_hub.delivery import pending_delivery_payload, prepare_delivery_payload
 
     try:
         if args.deliver_command == "pending":
@@ -1434,6 +1478,25 @@ def _handle_deliver(config, args) -> int:
                 config,
                 payload_type=getattr(args, "payload_type", "all") or "all",
                 limit=int(getattr(args, "limit", 20) or 20),
+                origin=getattr(args, "origin", None),
+                lens_matched=bool(getattr(args, "lens_matched", False)),
+                first_seen_only=bool(getattr(args, "first_seen_only", False)),
+            )
+        elif args.deliver_command == "prepare":
+            payload = asyncio.run(
+                prepare_delivery_payload(
+                    config,
+                    collect=getattr(args, "collect", "none") or "none",
+                    payload_type=getattr(args, "payload_type", "all") or "all",
+                    limit=int(getattr(args, "limit", 20) or 20),
+                    origin=getattr(args, "origin", None),
+                    lens_matched=bool(getattr(args, "lens_matched", False)),
+                    first_seen_only=bool(getattr(args, "first_seen_only", False)),
+                    timeout_per_sub=float(getattr(args, "timeout_per_sub", 120.0)),
+                    concurrency=int(getattr(args, "concurrency", 1) or 1),
+                    collect_all_active_func=collect_all_active,
+                    collect_all_due_func=collect_all_due,
+                )
             )
         else:
             payload = {"ok": False, "error": "unknown deliver command"}

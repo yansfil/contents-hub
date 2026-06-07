@@ -62,7 +62,7 @@ The agent should:
 4. Install the editable CLI with `uv tool install`.
 5. Initialize or reuse the requested vault.
 6. Use CLI commands such as `sub add`, `fetch-all`, `digest`, `deliver pending`,
-   `delivery record`, and `interaction handle`.
+   `deliver prepare`, `delivery record`, and `interaction handle`.
 
 ## Runtime-Specific Skill Registration
 
@@ -145,6 +145,7 @@ contents-hub --vault "$HOME/contents-vault" browser open https://x.com/login
 contents-hub --vault "$HOME/contents-vault" fetch-all
 contents-hub --vault "$HOME/contents-vault" digest
 contents-hub --vault "$HOME/contents-vault" deliver pending --format json
+contents-hub --vault "$HOME/contents-vault" deliver prepare --collect fetch-all --payload-type raw_item --origin subscription --lens-matched --first-seen-only --format json
 contents-hub --vault "$HOME/contents-vault" delivery record ...
 contents-hub --vault "$HOME/contents-vault" interaction handle --event-json '<json>'
 ```
@@ -165,8 +166,8 @@ VAULT="$(mktemp -d)/vault"
 contents-hub --vault "$VAULT" init "$VAULT"
 contents-hub --vault "$VAULT" raw add "Example story body" --title "Example story"
 contents-hub --vault "$VAULT" digest
-PENDING="$(contents-hub --vault "$VAULT" deliver pending --format json)"
-RAW_ITEM_ID="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(p["items"][0]["raw_item_id"])' "$PENDING")"
+PENDING="$(contents-hub --vault "$VAULT" deliver prepare --collect none --payload-type raw_item --format json)"
+RAW_ITEM_ID="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(p["delivery"]["items"][0]["raw_item_id"])' "$PENDING")"
 contents-hub --vault "$VAULT" delivery record \
   --platform demo \
   --channel-id demo-channel \
@@ -183,8 +184,10 @@ contents-hub --vault "$VAULT" interaction handle \
 ```
 
 Expected result: the CLI creates a vault, accepts a raw item, produces a
-runtime-neutral digest response, emits delivery JSON, records a demo outbound
-message, and handles the reaction without provider credentials.
+runtime-neutral digest response, emits delivery JSON through `deliver prepare`,
+records a demo outbound message, and handles the reaction without provider
+credentials. In real Telegram/Slack/Discord integrations, reactions only map
+when the adapter records the platform message id returned by the send API.
 
 ## What To Install
 

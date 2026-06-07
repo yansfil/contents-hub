@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
-import sqlite3
+import asyncio
 from datetime import datetime, timezone
 
+import pytest
+
 from contents_hub.channels import FakeAdapter, normalize_discord_event, normalize_slack_event
-from contents_hub.cli import main as cli_main
+from contents_hub.cli import build_parser, main as cli_main
 from contents_hub.config import WikiConfig
 from contents_hub.db import get_db, init_db
-from contents_hub.delivery import pending_delivery_payload
+from contents_hub.delivery import pending_delivery_payload, prepare_delivery_payload
 from contents_hub.interactions import handle_interaction, record_outbound_message
 
 
@@ -38,6 +40,76 @@ def _seed_raw_item(cfg: WikiConfig) -> int:
             ),
         )
         return int(cur.lastrowid)
+
+
+def _seed_subscription(cfg: WikiConfig) -> int:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db(cfg) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO subscriptions
+                (url, title, source_type, status, default_lens_ids,
+                 config, created_at, updated_at)
+            VALUES (?, 'Feed', 'rss.feed', 'active', '[]', '{}', ?, ?)
+            """,
+            ("https://example.com/feed.xml", now, now),
+        )
+        return int(cur.lastrowid)
+
+
+def _insert_raw_item(
+    cfg: WikiConfig,
+    *,
+    url: str,
+    title: str,
+    origin: str = "subscription",
+    priority: int = 50,
+    subscription_id: int | None = None,
+    collected_at: str,
+) -> int:
+    with get_db(cfg) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO raw_items
+                (url, title, body, origin, priority, status, subscription_id,
+                 content_summary, metadata_json, collected_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'raw', ?, ?, '{}', ?, ?)
+            """,
+            (
+                url,
+                title,
+                f"Body for {title}",
+                origin,
+                priority,
+                subscription_id,
+                f"Summary for {title}",
+                collected_at,
+                collected_at,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def _attach_lens(cfg: WikiConfig, raw_item_id: int, lens_id: str = "agent-tech") -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db(cfg) as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO lenses
+                (id, name, description, keywords, enabled, created_at, updated_at)
+            VALUES (?, ?, '', '[]', 1, ?, ?)
+            """,
+            (lens_id, lens_id, now, now),
+        )
+        conn.execute(
+            """
+            INSERT INTO raw_item_lenses
+                (raw_item_id, lens_id, summary, bullets_json)
+            VALUES (?, ?, ?, '[]')
+            """,
+            (raw_item_id, lens_id, f"Lens summary for {lens_id}"),
+        )
+        conn.commit()
 
 
 def test_schema_v14_adds_delivery_and_interaction_tables(tmp_path):
@@ -125,6 +197,130 @@ def test_pending_delivery_payload_and_fake_adapter_round_trip(tmp_path):
 
     pending_after = pending_delivery_payload(cfg, payload_type="raw_item")
     assert pending_after["items"] == []
+
+
+def test_pending_delivery_filters_subscription_lens_and_first_seen(tmp_path):
+    cfg = _cfg(tmp_path)
+    subscription_id = _seed_subscription(cfg)
+
+    _insert_raw_item(
+        cfg,
+        url="https://example.com/a",
+        title="Older A",
+        subscription_id=None,
+        collected_at="2026-01-01T00:00:00+00:00",
+    )
+    newer_duplicate = _insert_raw_item(
+        cfg,
+        url="https://example.com/a",
+        title="Newer A",
+        subscription_id=subscription_id,
+        collected_at="2026-01-02T00:00:00+00:00",
+    )
+    no_lens = _insert_raw_item(
+        cfg,
+        url="https://example.com/b",
+        title="No Lens",
+        subscription_id=subscription_id,
+        collected_at="2026-01-03T00:00:00+00:00",
+    )
+    manual = _insert_raw_item(
+        cfg,
+        url="https://example.com/c",
+        title="Manual",
+        origin="manual",
+        priority=100,
+        subscription_id=None,
+        collected_at="2026-01-04T00:00:00+00:00",
+    )
+    included = _insert_raw_item(
+        cfg,
+        url="https://example.com/d",
+        title="Included",
+        subscription_id=subscription_id,
+        collected_at="2026-01-05T00:00:00+00:00",
+    )
+    _attach_lens(cfg, newer_duplicate)
+    _attach_lens(cfg, manual)
+    _attach_lens(cfg, included)
+
+    payload = pending_delivery_payload(
+        cfg,
+        payload_type="raw_item",
+        origin="subscription",
+        lens_matched=True,
+        first_seen_only=True,
+        limit=20,
+    )
+
+    assert [item["raw_item_id"] for item in payload["items"]] == [included]
+    assert no_lens not in [item["raw_item_id"] for item in payload["items"]]
+    card = payload["items"][0]
+    assert card["delivery_key"] == f"raw_item:{included}"
+    assert card["dedupe_key"] == "url:https://example.com/d"
+    assert card["plain_text"] == (
+        "Included\n\nSummary for Included\n\nhttps://example.com/d"
+    )
+    assert card["markdown"] == (
+        "**Included**\n\nSummary for Included\n\nhttps://example.com/d"
+    )
+    assert card["lens_ids"] == ["agent-tech"]
+    assert card["source_type"] == "rss.feed"
+
+
+def test_pending_delivery_excludes_already_recorded_raw_items(tmp_path):
+    cfg = _cfg(tmp_path)
+    raw_item_id = _seed_raw_item(cfg)
+    record_outbound_message(
+        cfg,
+        platform="fake",
+        message_id="already-sent",
+        payload_type="raw_item",
+        raw_item_id=raw_item_id,
+    )
+
+    payload = pending_delivery_payload(cfg, payload_type="raw_item")
+
+    assert payload["ok"] is True
+    assert payload["items"] == []
+
+
+def test_prepare_delivery_card_round_trip_preserves_reaction_mapping(tmp_path):
+    cfg = _cfg(tmp_path)
+    raw_item_id = _seed_raw_item(cfg)
+
+    payload = asyncio.run(
+        prepare_delivery_payload(
+            cfg,
+            collect="none",
+            payload_type="raw_item",
+            limit=20,
+        )
+    )
+    card = payload["delivery"]["items"][0]
+    adapter = FakeAdapter()
+    outbound = adapter.send_item(card)
+    record_outbound_message(
+        cfg,
+        platform=outbound.platform,
+        message_id=outbound.message_id,
+        payload_type=card["payload_type"],
+        raw_item_id=card["raw_item_id"],
+    )
+
+    result = handle_interaction(
+        cfg,
+        {
+            "platform": outbound.platform,
+            "message_id": outbound.message_id,
+            "kind": "reaction",
+            "value": "⭐",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["action"] == "save_and_promote"
+    assert result["raw_item_id"] == raw_item_id
 
 
 def test_reaction_save_promote_is_idempotent_and_logged(tmp_path):
@@ -332,6 +528,215 @@ def test_cli_delivery_and_interaction_flow(tmp_path, capsys):
     assert rc == 0
     assert out["ok"] is True
     assert out["action"] == "save_and_promote"
+
+
+def test_deliver_help_exposes_prepare_and_filters(capsys):
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["deliver", "--help"])
+    assert exc.value.code == 0
+    deliver_help = capsys.readouterr().out
+    assert "prepare" in deliver_help
+    assert "pending" in deliver_help
+
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["deliver", "pending", "--help"])
+    assert exc.value.code == 0
+    pending_help = capsys.readouterr().out
+
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["deliver", "prepare", "--help"])
+    assert exc.value.code == 0
+    prepare_help = capsys.readouterr().out
+
+    for help_text in (pending_help, prepare_help):
+        assert "--origin" in help_text
+        assert "--lens-matched" in help_text
+        assert "--first-seen-only" in help_text
+        assert "--payload-type" in help_text
+    assert "--collect" in prepare_help
+    assert "fetch-all" in prepare_help
+
+
+def test_deliver_prepare_collect_fetch_all_returns_collector_and_delivery(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    cfg = _cfg(tmp_path)
+    raw_item_id = _seed_raw_item(cfg)
+    calls: dict[str, object] = {}
+
+    async def fake_collect_all_active(
+        config,
+        *,
+        include_error,
+        per_subscription_timeout_seconds,
+        concurrency,
+    ):
+        calls["vault"] = config.vault_path
+        calls["include_error"] = include_error
+        calls["timeout"] = per_subscription_timeout_seconds
+        calls["concurrency"] = concurrency
+
+        class Tick:
+            total = 1
+            new = 1
+            skipped = 0
+            errors = 0
+            duration_seconds = 0.01
+            per_subscription = []
+
+        return Tick()
+
+    monkeypatch.setattr("contents_hub.cli.collect_all_active", fake_collect_all_active)
+
+    rc = cli_main(
+        [
+            "--vault",
+            str(cfg.vault_path),
+            "deliver",
+            "prepare",
+            "--collect",
+            "fetch-all",
+            "--payload-type",
+            "raw_item",
+            "--timeout-per-sub",
+            "5",
+            "--concurrency",
+            "2",
+            "--format",
+            "json",
+        ]
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert rc == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["collector"]["command"] == "fetch-all"
+    assert payload["collector"]["ok"] is True
+    assert payload["collector"]["errors"] == []
+    assert payload["collector"]["summary"]["new_items"] == 1
+    assert payload["delivery"]["ok"] is True
+    assert payload["delivery"]["payload_type"] == "raw_item"
+    assert payload["delivery"]["items"][0]["raw_item_id"] == raw_item_id
+    assert calls == {
+        "vault": cfg.vault_path,
+        "include_error": True,
+        "timeout": 5.0,
+        "concurrency": 2,
+    }
+
+
+def test_deliver_prepare_collect_tick_returns_collector_and_delivery(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    cfg = _cfg(tmp_path)
+    raw_item_id = _seed_raw_item(cfg)
+    calls: dict[str, object] = {}
+
+    async def fake_collect_all_due(
+        config,
+        *,
+        per_subscription_timeout_seconds,
+    ):
+        calls["vault"] = config.vault_path
+        calls["timeout"] = per_subscription_timeout_seconds
+
+        class Tick:
+            total = 1
+            new = 1
+            skipped = 0
+            errors = 0
+            duration_seconds = 0.02
+            per_subscription = []
+
+        return Tick()
+
+    monkeypatch.setattr("contents_hub.cli.collect_all_due", fake_collect_all_due)
+
+    rc = cli_main(
+        [
+            "--vault",
+            str(cfg.vault_path),
+            "deliver",
+            "prepare",
+            "--collect",
+            "tick",
+            "--payload-type",
+            "raw_item",
+            "--timeout-per-sub",
+            "7",
+            "--format",
+            "json",
+        ]
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert rc == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["collector"]["command"] == "tick"
+    assert payload["collector"]["ok"] is True
+    assert payload["collector"]["summary"]["new_items"] == 1
+    assert payload["delivery"]["items"][0]["raw_item_id"] == raw_item_id
+    assert calls == {"vault": cfg.vault_path, "timeout": 7.0}
+
+
+def test_deliver_prepare_collect_failure_emits_single_json_and_nonzero(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    cfg = _cfg(tmp_path)
+
+    async def failing_collect_all_active(
+        config,
+        *,
+        include_error,
+        per_subscription_timeout_seconds,
+        concurrency,
+    ):
+        raise RuntimeError("collector exploded")
+
+    monkeypatch.setattr("contents_hub.cli.collect_all_active", failing_collect_all_active)
+
+    rc = cli_main(
+        [
+            "--vault",
+            str(cfg.vault_path),
+            "deliver",
+            "prepare",
+            "--collect",
+            "fetch-all",
+            "--payload-type",
+            "raw_item",
+            "--format",
+            "json",
+        ]
+    )
+    captured = capsys.readouterr()
+    lines = [line for line in captured.out.splitlines() if line.strip()]
+    payload = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert len(lines) == 1
+    assert payload["ok"] is False
+    assert payload["collector"] == {
+        "command": "fetch-all",
+        "ok": False,
+        "summary": {},
+        "errors": ["collector exploded"],
+    }
+    assert payload["delivery"]["ok"] is True
+    assert payload["error"] == "collector exploded"
 
 
 def test_slack_and_discord_fixtures_normalize_to_shared_shape():

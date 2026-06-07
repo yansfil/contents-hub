@@ -184,7 +184,7 @@ Hermes no-agent cron jobs:
 
 | Job | Schedule | Delivery | Responsibility |
 | --- | --- | --- | --- |
-| Hourly fetch and notify | `0 * * * *` | Direct adapter send, empty stdout on success | Run `fetch-all`, detect newly inserted subscription items, send each matched item as its own message, then call `delivery record`. |
+| Hourly fetch and notify | `0 * * * *` | Direct adapter send, empty stdout on success | Run `deliver prepare --collect fetch-all`, send each returned card as its own message, then call `delivery record`. |
 | Daily digest | `0 9 * * *` | Hermes `--deliver origin` or a configured gateway target | Run `digest`, print a concise digest/failure report, and let Hermes deliver the script stdout. |
 | Optional exploration | User-approved cadence | Usually local or origin | Run `exploration run-all` or a specific exploration id only after the user has approved the recipe. |
 
@@ -210,36 +210,12 @@ that reactions will later contain.
 #!/usr/bin/env python3
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 
 VAULT = os.environ.get("CONTENTS_HUB_VAULT", os.path.expanduser("~/contents-vault"))
-DB = os.path.join(VAULT, ".contents-hub", "state.db")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
 HERMES_SEND_TARGET = os.environ["HERMES_SEND_TARGET"]  # e.g. telegram:-1001234567890
-
-
-def scalar(sql, params=()):
-    with sqlite3.connect(DB) as conn:
-        return conn.execute(sql, params).fetchone()[0]
-
-
-def new_matched_subscription_items(after_id):
-    sql = """
-    select ri.id, ri.title, ri.url, coalesce(ri.content_summary, '') as summary
-    from raw_items ri
-    where ri.id > ?
-      and ri.origin = 'subscription'
-      and ri.subscription_id is not null
-      and coalesce(ri.url, '') != ''
-      and exists (select 1 from raw_item_lenses ril where ril.raw_item_id = ri.id)
-    order by ri.id asc
-    limit 20
-    """
-    with sqlite3.connect(DB) as conn:
-        conn.row_factory = sqlite3.Row
-        return [dict(row) for row in conn.execute(sql, (after_id,))]
 
 
 def target_parts():
@@ -267,10 +243,8 @@ def extract_message_id(payload):
 
 
 def format_message(item):
-    title = item.get("title") or item.get("url") or "Untitled"
-    summary = item.get("summary") or ""
-    url = item.get("url") or ""
-    return "\n".join(part for part in ["🆕 contents-hub", title, summary, url] if part)
+    body = item.get("plain_text") or item.get("markdown") or item.get("title") or ""
+    return "\n".join(part for part in ["🆕 contents-hub", body] if part)
 
 
 def send_platform_message(item):
@@ -299,7 +273,7 @@ def send_platform_message(item):
     }
 
 
-def record_delivery(ref, raw_item_id):
+def record_delivery(ref, item):
     subprocess.run(
         [
             "contents-hub", "--vault", VAULT,
@@ -309,7 +283,7 @@ def record_delivery(ref, raw_item_id):
             "--thread-id", ref.get("thread_id", ""),
             "--message-id", ref["message_id"],
             "--payload-type", "raw_item",
-            "--raw-item-id", str(raw_item_id),
+            "--raw-item-id", str(item["raw_item_id"]),
         ],
         check=True,
         text=True,
@@ -317,32 +291,43 @@ def record_delivery(ref, raw_item_id):
     )
 
 
-def main():
-    before = int(scalar("select coalesce(max(id), 0) from raw_items") or 0)
+def prepare_cards():
     proc = subprocess.run(
-        ["contents-hub", "--vault", VAULT, "fetch-all", "--timeout-per-sub", "180"],
+        [
+            "contents-hub", "--vault", VAULT,
+            "deliver", "prepare",
+            "--collect", "fetch-all",
+            "--payload-type", "raw_item",
+            "--origin", "subscription",
+            "--lens-matched",
+            "--first-seen-only",
+            "--limit", "20",
+            "--timeout-per-sub", "180",
+            "--format", "json",
+        ],
         check=False,
         text=True,
         capture_output=True,
         timeout=1800,
     )
-    if proc.returncode != 0:
-        print("contents-hub fetch-all failed")
-        print((proc.stdout or "")[-2000:])
-        print((proc.stderr or "")[-1000:])
-        return 0
     try:
-        fetch_payload = json.loads(proc.stdout or "{}")
+        payload = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
-        print("contents-hub fetch-all returned non-JSON output")
+        print("contents-hub deliver prepare returned non-JSON output")
         print((proc.stdout or "")[-2000:])
-        return 0
-    if fetch_payload.get("ok") is False:
-        print(json.dumps(fetch_payload, ensure_ascii=False)[:3000])
-        return 0
-    for item in new_matched_subscription_items(before):
+        return []
+    if proc.returncode != 0 or payload.get("ok") is False:
+        print(json.dumps(payload, ensure_ascii=False)[:3000])
+        return []
+    return list((payload.get("delivery") or {}).get("items") or [])
+
+
+def main():
+    for item in prepare_cards():
+        if item.get("payload_type") != "raw_item" or not item.get("raw_item_id"):
+            continue
         ref = send_platform_message(item)
-        record_delivery(ref, int(item["id"]))
+        record_delivery(ref, item)
     return 0
 
 
@@ -441,7 +426,13 @@ reaction handling.
 Adapter loop:
 
 ```bash
-contents-hub --vault "$HOME/contents-vault" deliver pending --format json
+contents-hub --vault "$HOME/contents-vault" deliver prepare \
+  --collect fetch-all \
+  --payload-type raw_item \
+  --origin subscription \
+  --lens-matched \
+  --first-seen-only \
+  --format json
 # send each item with a runtime adapter or platform bot
 contents-hub --vault "$HOME/contents-vault" delivery record \
   --platform telegram \
@@ -454,6 +445,11 @@ contents-hub --vault "$HOME/contents-vault" interaction handle --event-json '<no
 
 The adapter must preserve platform message ids. Without `delivery record`, a
 later reaction cannot be mapped back to the original raw item or digest.
+Hermes final-response delivery is useful for reports, but it is insufficient for
+reaction handling because it does not create per-card `outbound_messages` rows.
+contents-hub decides which cards are deliverable; adapters send those cards and
+record the returned message ids. Telegram SDKs, bot tokens, and channel
+credentials remain outside contents-hub core.
 
 If an older local setup wrote a custom Telegram mapping table directly, run any
 normal contents-hub command once against that vault after upgrading. The DB

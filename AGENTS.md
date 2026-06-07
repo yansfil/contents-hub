@@ -63,6 +63,7 @@ Single test:
 - `explore` and `exploration {add,list,run,run-all,delete}` - exploration
   lifecycle
 - `deliver pending` - adapter-ready raw item or digest cards
+- `deliver prepare` - optional `none|fetch-all|tick` collection plus adapter-ready cards
 - `delivery {record,list}` - outbound message mappings
 - `interaction handle` and `interaction rules list` - normalized interaction
   logging and action routing
@@ -133,8 +134,8 @@ events should be logged even when the resulting action is a safe no-op.
 
 Adapters should follow this flow:
 
-1. `contents-hub deliver pending --format json`
-2. send the card through the channel
+1. `contents-hub deliver prepare --collect fetch-all --payload-type raw_item --origin subscription --lens-matched --first-seen-only --format json` for collect-and-send loops, or `contents-hub deliver pending --format json` when collection already ran
+2. send each returned card through the channel
 3. `contents-hub delivery record ...`
 4. normalize the user interaction
 5. `contents-hub interaction handle --event-json '<json>' --format json`

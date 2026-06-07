@@ -39,9 +39,9 @@ This creates:
 
 ## 3. Add Content
 
-Manual URL/text is the shortest first-launch path. If no Lens exists yet,
-contents-hub creates and attaches a `manual-inbox` Lens automatically so the
-item can appear in the next digest:
+Manual URL/text is the shortest first-launch path. If no explicit Lens is
+provided, contents-hub attaches the item to enabled automatic Lenses so it can
+enter the digest flow without creating a recurring subscription:
 
 ```bash
 contents-hub --vault ~/contents-vault raw add "A pasted note" --title "Manual note"
@@ -90,8 +90,8 @@ This smoke uses a demo platform. Real Telegram, Slack, or Discord transport is
 owned by an external gateway or agent runtime.
 
 ```bash
-PENDING="$(contents-hub --vault ~/contents-vault deliver pending --format json)"
-RAW_ITEM_ID="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(p["items"][0]["raw_item_id"])' "$PENDING")"
+PENDING="$(contents-hub --vault ~/contents-vault deliver prepare --collect none --payload-type raw_item --format json)"
+RAW_ITEM_ID="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(p["delivery"]["items"][0]["raw_item_id"])' "$PENDING")"
 contents-hub --vault ~/contents-vault delivery record \
   --platform demo \
   --channel-id demo-channel \

@@ -63,6 +63,7 @@ contents-hub daemon --help
 contents-hub digest --help
 contents-hub browser --help
 contents-hub deliver pending --help
+contents-hub deliver prepare --help
 contents-hub delivery record --help
 contents-hub interaction handle --help
 ```
@@ -313,11 +314,22 @@ Generate adapter-ready payloads:
 ```bash
 contents-hub deliver pending --format json
 contents-hub deliver pending --payload-type raw_item --limit 5 --format json
+contents-hub deliver pending --payload-type raw_item --origin subscription --lens-matched --first-seen-only --limit 20 --format json
+contents-hub deliver prepare --collect fetch-all --payload-type raw_item --origin subscription --lens-matched --first-seen-only --limit 20 --format json
+contents-hub deliver prepare --collect tick --payload-type raw_item --format json
 contents-hub deliver pending --payload-type digest --limit 5 --format json
 ```
 
-The JSON contains `payload_type`, stable raw item or digest ids, titles, URLs,
-summaries, and enough context for an adapter to send a channel message.
+`deliver pending` only selects currently pending cards. `deliver prepare` can
+run `fetch-all`, `tick`, or no collector first, then emits one JSON object with
+`collector` and `delivery`. The nested delivery JSON contains `payload_type`,
+stable raw item or digest ids, titles, URLs, summaries, `delivery_key`,
+`dedupe_key`, `plain_text`, `markdown`, Lens ids, and enough context for an
+adapter to send a channel message.
+
+contents-hub decides which cards are deliverable. Use `--origin subscription`,
+`--lens-matched`, and `--first-seen-only` instead of writing runtime SQLite
+queries for raw item candidates.
 
 Record a sent message:
 
@@ -384,7 +396,7 @@ machine-readable safe results instead of crashing.
 Adapters for Telegram, Slack, Discord, Hermes, OpenClaw, or another gateway
 should:
 
-1. call `deliver pending --format json`
+1. call `deliver prepare --collect fetch-all --format json` or `deliver pending --format json`
 2. send each card through the platform
 3. call `delivery record` with the returned message id
 4. normalize platform events to the shared event shape
@@ -393,6 +405,9 @@ should:
 Core contents-hub should not import channel SDKs during base import.
 Do not claim built-in Telegram, Slack, or Discord bot packages unless such an
 external adapter package is explicitly installed.
+Final-response-only delivery is insufficient for reactions because it does not
+record per-card platform message ids. Telegram SDKs and credentials remain
+outside contents-hub core.
 
 ## Runner Selection
 

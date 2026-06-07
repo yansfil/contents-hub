@@ -50,7 +50,8 @@ and chat surfaces.
 - Store everything locally in a vault with `.contents-hub/state.db` and
   Markdown source notes.
 - Generate digest briefings from Lens-routed raw items.
-- Emit channel-ready cards with `deliver pending`.
+- Emit channel-ready cards with `deliver pending`, or run collection plus card
+  selection in one JSON-only call with `deliver prepare --collect fetch-all`.
 - Persist platform message ids with `delivery record`.
 - Turn reactions such as `👍`, `⭐`, and `❤️` into saved Markdown source notes
   with `interaction handle`.
@@ -64,7 +65,7 @@ flowchart LR
     B --> C[(Local SQLite state)]
     C --> D[Lenses]
     D --> E[Digests]
-    C --> F[deliver pending]
+    C --> F[deliver pending / deliver prepare]
     F --> G[Hermes, OpenClaw, cron, bot, or adapter]
     G --> H[Telegram, Slack, Discord, email, etc.]
     H --> I[reaction event]
@@ -75,7 +76,10 @@ flowchart LR
 
 The runtime decides **when** to run and **where** to send messages. contents-hub
 decides **what content exists**, **what has already been delivered**, and **what
-a reaction should do**.
+a reaction should do**. Runtime watchdogs should not reimplement raw-item SQL
+filters; use `deliver prepare --collect fetch-all --origin subscription
+--lens-matched --first-seen-only --format json` as the canonical collect-and-
+deliver contract.
 
 ## Reliable first-launch path
 
@@ -137,8 +141,8 @@ openclaw skills install ./skills/contents-hub --as contents-hub --global
 
 The skill is intentionally CLI-first. Agents should use commands such as
 `contents-hub sub add`, `fetch-all`, `digest`, `deliver pending`,
-`delivery record`, and `interaction handle` instead of inventing runtime-specific
-state.
+`deliver prepare`, `delivery record`, and `interaction handle` instead of
+inventing runtime-specific state.
 
 See [install.md](install.md) for the full skill-first setup contract and smoke
 tests.
@@ -149,9 +153,15 @@ contents-hub does not need to own your Telegram, Slack, or Discord bot. It only
 needs a channel adapter to preserve message ids.
 
 ```bash
-contents-hub --vault ~/contents-vault deliver pending --format json
+contents-hub --vault ~/contents-vault deliver prepare \
+  --collect fetch-all \
+  --payload-type raw_item \
+  --origin subscription \
+  --lens-matched \
+  --first-seen-only \
+  --format json
 
-# send the card with your runtime adapter, then record the platform message id
+# send each returned card with your runtime adapter, then record the platform message id
 contents-hub --vault ~/contents-vault delivery record \
   --platform telegram \
   --channel-id <chat_id> \

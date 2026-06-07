@@ -15,6 +15,7 @@ the clock.
 contents-hub --vault ~/contents-vault fetch-all
 contents-hub --vault ~/contents-vault digest
 contents-hub --vault ~/contents-vault exploration run-all
+contents-hub --vault ~/contents-vault deliver prepare --collect fetch-all --payload-type raw_item --origin subscription --lens-matched --first-seen-only --format json
 contents-hub --vault ~/contents-vault deliver pending --format json
 contents-hub --vault ~/contents-vault interaction handle --event-json '<json>'
 ```
@@ -29,7 +30,7 @@ cannot map back to raw items unless a channel adapter also calls
 ```cron
 */30 * * * * contents-hub --vault ~/contents-vault fetch-all
 0 8 * * * contents-hub --vault ~/contents-vault digest
-0 9 * * * contents-hub --vault ~/contents-vault deliver pending --format json > ~/contents-vault/.contents-hub/latest-delivery.json
+0 9 * * * contents-hub --vault ~/contents-vault deliver prepare --collect fetch-all --payload-type raw_item --origin subscription --lens-matched --first-seen-only --format json > ~/contents-vault/.contents-hub/latest-delivery.json
 ```
 
 ## launchd
@@ -45,7 +46,7 @@ Hermes should own gateway and scheduler lifecycle. It can:
 
 1. run `fetch-all` and `digest` on its schedule
 2. run `exploration run` or `exploration run-all` for approved recipes
-3. call `deliver pending --format json`
+3. call `deliver prepare --collect fetch-all --format json` or `deliver pending --format json`
 4. send payloads through Telegram
 5. call `delivery record`
 6. forward reactions to `interaction handle`
@@ -75,15 +76,16 @@ hermes gateway status
 ```
 
 Hermes delivers the cron final response itself. Use the lower-level
-`deliver pending` / `delivery record` / `interaction handle` flow only when you
-are building a real channel adapter that needs per-card message ids and reaction
-round-trips.
+`deliver prepare` or `deliver pending` / `delivery record` /
+`interaction handle` flow only when you are building a real channel adapter that
+needs per-card message ids and reaction round-trips.
 
 For a production-like Hermes setup, prefer two jobs:
 
-- Hourly no-agent fetch watchdog: run `fetch-all`; if new Lens-matched
-  subscription items appear, send each item through the platform adapter and
-  call `delivery record`; otherwise keep stdout empty.
+- Hourly no-agent fetch watchdog: run
+  `deliver prepare --collect fetch-all --payload-type raw_item --origin subscription --lens-matched --first-seen-only`;
+  if cards are returned, send each item through the platform adapter and call
+  `delivery record`; otherwise keep stdout empty.
 - Daily digest report: run `digest`; print the digest or subscription health
   report to stdout and let Hermes deliver it to `origin`, `telegram`, or another
   configured target.
@@ -99,7 +101,7 @@ Example task sequence:
 ```bash
 contents-hub --vault ~/contents-vault fetch-all
 contents-hub --vault ~/contents-vault digest
-contents-hub --vault ~/contents-vault deliver pending --format json
+contents-hub --vault ~/contents-vault deliver prepare --collect fetch-all --format json
 ```
 
 ## Claude Code And Codex Loops
@@ -114,5 +116,12 @@ Useful loop actions:
 contents-hub --vault ~/contents-vault fetch-all
 contents-hub --vault ~/contents-vault exploration run-all
 contents-hub --vault ~/contents-vault digest
+contents-hub --vault ~/contents-vault deliver prepare --collect fetch-all --format json
 contents-hub --vault ~/contents-vault deliver pending --format json
 ```
+
+contents-hub decides which cards are deliverable. Schedulers and channel
+adapters should consume the JSON cards, send them, and call `delivery record`;
+they should not compute first-seen or Lens-matched raw item candidates by
+querying SQLite directly. Telegram SDKs and credentials remain outside
+contents-hub core.

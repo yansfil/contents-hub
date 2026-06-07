@@ -28,6 +28,7 @@ local-first content inbox.
   - `contents-hub browser kill`
 - Transport-neutral channel contract:
   - `contents-hub deliver pending`
+  - `contents-hub deliver prepare`
   - `contents-hub delivery record`
   - `contents-hub interaction handle`
 - Demo delivery/interaction smoke using `platform demo`.
@@ -48,7 +49,7 @@ local-first content inbox.
 - Exact `npx skills` or `skills.sh` one-line installer command.
 - Slack adapter.
 - Discord adapter.
-- Telegram/Hermes reference adapter.
+- Telegram/Hermes reference adapter that calls `deliver prepare`, sends cards, records returned message ids, and forwards reactions to `interaction handle`.
 - PyPI or package registry distribution.
 - MCP bridge.
 - Additional agent runners beyond `claude-sdk`.
