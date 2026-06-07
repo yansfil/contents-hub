@@ -19,6 +19,11 @@ contents-hub --vault ~/contents-vault deliver pending --format json
 contents-hub --vault ~/contents-vault interaction handle --event-json '<json>'
 ```
 
+Jobs that only run `fetch-all` and `digest` do not create per-card message
+mappings. They are enough for a daily final-response digest, but reactions
+cannot map back to raw items unless a channel adapter also calls
+`delivery record`.
+
 ## cron
 
 ```cron
@@ -74,10 +79,20 @@ Hermes delivers the cron final response itself. Use the lower-level
 are building a real channel adapter that needs per-card message ids and reaction
 round-trips.
 
+For a production-like Hermes setup, prefer two jobs:
+
+- Hourly no-agent fetch watchdog: run `fetch-all`; if new Lens-matched
+  subscription items appear, send each item through the platform adapter and
+  call `delivery record`; otherwise keep stdout empty.
+- Daily digest report: run `digest`; print the digest or subscription health
+  report to stdout and let Hermes deliver it to `origin`, `telegram`, or another
+  configured target.
+
 ## OpenClaw
 
 OpenClaw should own scheduled tasks and channel gateway code. Treat
-contents-hub as a local CLI state engine.
+contents-hub as a local CLI state engine. For runnable `openclaw cron create`
+examples, use `docs/openclaw-setup.md`.
 
 Example task sequence:
 

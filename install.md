@@ -165,13 +165,14 @@ VAULT="$(mktemp -d)/vault"
 contents-hub --vault "$VAULT" init "$VAULT"
 contents-hub --vault "$VAULT" raw add "Example story body" --title "Example story"
 contents-hub --vault "$VAULT" digest
-contents-hub --vault "$VAULT" deliver pending --format json
+PENDING="$(contents-hub --vault "$VAULT" deliver pending --format json)"
+RAW_ITEM_ID="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(p["items"][0]["raw_item_id"])' "$PENDING")"
 contents-hub --vault "$VAULT" delivery record \
   --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
   --payload-type raw_item \
-  --raw-item-id 1
+  --raw-item-id "$RAW_ITEM_ID"
 contents-hub --vault "$VAULT" interaction handle \
   --platform demo \
   --channel-id demo-channel \

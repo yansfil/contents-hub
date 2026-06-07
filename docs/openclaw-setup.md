@@ -72,10 +72,14 @@ Before changing an existing install:
 
 ```bash
 VAULT="$HOME/contents-vault"
-cp "$VAULT/.contents-hub/state.db" "$VAULT/.contents-hub/state.db.backup.$(date +%Y%m%d%H%M%S)"
-contents-hub --vault "$VAULT" sub list --format json
-contents-hub --vault "$VAULT" lens list --format json
-contents-hub --vault "$VAULT" delivery list --limit 20
+if [ -f "$VAULT/.contents-hub/state.db" ]; then
+  cp "$VAULT/.contents-hub/state.db" "$VAULT/.contents-hub/state.db.backup.$(date +%Y%m%d%H%M%S)"
+  contents-hub --vault "$VAULT" sub list --format json
+  contents-hub --vault "$VAULT" lens list --format json
+  contents-hub --vault "$VAULT" delivery list --limit 20
+else
+  contents-hub init "$VAULT"
+fi
 ```
 
 Do not delete `.contents-hub/state.db` during ordinary setup. Do not clear
@@ -106,6 +110,28 @@ Recommended jobs:
 - Optional exploration: run `exploration run-all` only for user-approved
   explorations.
 
+OpenClaw cron example:
+
+```bash
+openclaw cron create "0 * * * *" \
+  "Use the contents-hub skill. Run contents-hub --vault ~/contents-vault fetch-all. If it succeeds with no errors, reply with NO_REPLY. Otherwise report failed subscription details from the JSON." \
+  --name contents-hub-fetch-hourly \
+  --session isolated \
+  --agent <agent-id>
+
+openclaw cron create "0 9 * * *" \
+  "Use the contents-hub skill. Run contents-hub --vault ~/contents-vault fetch-all. If it succeeds, run contents-hub --vault ~/contents-vault digest and report the digest id and item count." \
+  --name contents-hub-daily-digest \
+  --session isolated \
+  --agent <agent-id>
+```
+
+Run `openclaw cron --help` and `openclaw cron show <job-id>` in the user's
+environment to confirm delivery routing. Use `--no-deliver` when the scheduler
+should store the result internally, or OpenClaw channel flags such as
+`--announce --channel telegram --to <target>` when the user's installation
+supports them.
+
 ## Channel Delivery
 
 OpenClaw can use either pattern:
@@ -126,11 +152,19 @@ contents-hub --vault "$HOME/contents-vault" delivery record \
   --message-id <message_id> \
   --payload-type raw_item \
   --raw-item-id <raw_item_id>
+contents-hub --vault "$HOME/contents-vault" delivery record \
+  --platform demo \
+  --channel-id <channel_id> \
+  --message-id <message_id> \
+  --payload-type digest \
+  --digest-id <digest_id>
 contents-hub --vault "$HOME/contents-vault" interaction handle --event-json '<normalized-event>' --format json
 ```
 
-The adapter must store platform message ids through `delivery record`. Without
-that mapping, reactions cannot be resolved back to contents-hub items.
+The adapter must read `raw_item_id` or `digest_id` from
+`deliver pending --format json` and store returned platform message ids through
+`delivery record`. Without that mapping, reactions cannot be resolved back to
+contents-hub items.
 
 ## Agent Checklist
 

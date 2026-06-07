@@ -94,35 +94,55 @@ def test_launch_docs_keep_first_success_and_followups_clear():
     channels = (ROOT / "docs" / "channels.md").read_text(encoding="utf-8")
     launch = (ROOT / "docs" / "launch.md").read_text(encoding="utf-8")
     runtime_matrix = (ROOT / "docs" / "runtime-matrix.md").read_text(encoding="utf-8")
+    schedulers = (ROOT / "docs" / "schedulers.md").read_text(encoding="utf-8")
     hermes_setup = (ROOT / "docs" / "hermes-setup.md").read_text(encoding="utf-8")
     openclaw_setup = (ROOT / "docs" / "openclaw-setup.md").read_text(encoding="utf-8")
     skill = (ROOT / "skills" / "contents-hub" / "SKILL.md").read_text(encoding="utf-8")
 
     assert "Reliable first-launch path" in readme
+    assert "uv sync\nuv run contents-hub --help" in readme
     assert "manual content, local digest generation" in install
     assert "Manual URL/text is the shortest first-launch path" in quickstart
     assert "automatic `manual-inbox`" in launch
     assert "does not ship built-in Telegram, Slack, or Discord bot packages" in channels
     assert "ok`, `count`, and `items`" in channels
+    assert "raw_item` and `digest` are the only" in channels
     assert "openclaw skills install ./skills/contents-hub --as contents-hub --global" in install
     assert "OpenClaw Git installs expect `SKILL.md` at repo root" in skill
     assert "hermes skills install skills-sh/yansfil/contents-hub/skills/contents-hub --yes" in install
-    assert "hermes cron create" in (ROOT / "docs" / "schedulers.md").read_text(encoding="utf-8")
+    assert "hermes cron create" in schedulers
+    assert "delivery record" in schedulers
     assert "Skill Registration Notes" in runtime_matrix
     assert "docs/hermes-setup.md" in runtime_matrix
     assert "docs/openclaw-setup.md" in runtime_matrix
     assert "Profile-Aware Install" in hermes_setup
     assert "Existing Vault Safety" in hermes_setup
     assert "Recommended Cron Topology" in hermes_setup
+    assert "Production-Like No-Agent Topology" in hermes_setup
+    assert "Reference Hourly Adapter Script Shape" in hermes_setup
+    assert '"hermes", "--profile", HERMES_PROFILE' in hermes_setup
+    assert "HERMES_SEND_TARGET must include an explicit channel id" in hermes_setup
+    assert "telegram_raw_item_messages" in hermes_setup
     assert "Adapter Delivery" in hermes_setup
     assert "OpenClaw Setup Runbook" in openclaw_setup
+    assert "openclaw cron create" in openclaw_setup
+    assert "test -f" not in openclaw_setup
+    assert "if [ -f" in openclaw_setup
+    assert "--payload-type digest" in openclaw_setup
     assert "Runtime final response" in openclaw_setup
+    assert "save_and_promote` inserts the item into `saved_items`" in channels
+    assert "Current contents-hub migrations copy" in channels
     assert "Setup Mode" in skill
+    assert "github.releases" in skill
+    assert "substack.tag" in skill
+    assert "Reactions only work when a per-card adapter preserves" in skill
     assert "Do not ask the user to install a separate init skill" in skill
     assert "version: 0.2.0" in skill
     assert "platform demo" in launch
     public_launch_docs = (
-        readme + install + quickstart + channels + launch + runtime_matrix
+        readme + install + quickstart + channels + launch + runtime_matrix + schedulers
         + hermes_setup + openclaw_setup + skill
     )
     assert "contents-hub-explore" not in public_launch_docs
+    assert "--raw-item-id 1" not in public_launch_docs
+    assert "digest section/item cards" not in public_launch_docs

@@ -74,7 +74,7 @@ Manual CLI install:
 ```bash
 git clone https://github.com/yansfil/contents-hub
 cd contents-hub
-uv sync --all-extras
+uv sync
 uv run contents-hub --help
 ```
 

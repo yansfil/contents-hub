@@ -12,17 +12,11 @@ tests.
 From a checkout:
 
 ```bash
-uv sync --all-extras
+uv sync
 uv tool install -e "$PWD" --force
 uv tool update-shell
 contents-hub --help
 python -m contents_hub --help
-```
-
-For a runtime-neutral install without optional agent dependencies, use:
-
-```bash
-uv sync
 ```
 
 Claude-backed browser/agent features are optional:
@@ -53,11 +47,15 @@ Vault configuration uses `.contents-hub.yaml` when present.
 
 ## 3. Target The Same Vault From Anywhere
 
-Every command accepts `--vault PATH`. Resolution order is:
+Every vault command except `init` accepts `--vault PATH`. Resolution order is:
 
 1. `--vault PATH`
 2. `CONTENTS_HUB_VAULT`
 3. current working directory
+
+`init` initializes its positional path. Pass the path explicitly:
+`contents-hub init "$HOME/contents-vault"` or
+`contents-hub --vault "$HOME/contents-vault" init "$HOME/contents-vault"`.
 
 Set a default in your shell profile:
 
@@ -167,13 +165,14 @@ This smoke uses a demo platform. Real Telegram, Slack, or Discord transport
 belongs in an external gateway or agent runtime.
 
 ```bash
-contents-hub deliver pending --format json
+PENDING="$(contents-hub deliver pending --format json)"
+RAW_ITEM_ID="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(p["items"][0]["raw_item_id"])' "$PENDING")"
 contents-hub delivery record \
   --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
   --payload-type raw_item \
-  --raw-item-id 1
+  --raw-item-id "$RAW_ITEM_ID"
 contents-hub interaction handle \
   --platform demo \
   --channel-id demo-channel \

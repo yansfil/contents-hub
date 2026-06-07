@@ -153,21 +153,232 @@ LLM involvement. Scripts must live under the Hermes scripts directory for the
 profile that owns the job.
 
 ```bash
-cat > "$HOME/.hermes/scripts/contents-hub-fetch.sh" <<'SH'
+PROFILE="<profile>"
+if [ "$PROFILE" = "default" ]; then
+  HERMES_SCRIPTS_DIR="$HOME/.hermes/scripts"
+else
+  HERMES_SCRIPTS_DIR="$HOME/.hermes/profiles/$PROFILE/scripts"
+fi
+mkdir -p "$HERMES_SCRIPTS_DIR"
+
+cat > "$HERMES_SCRIPTS_DIR/contents-hub-fetch.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 OUT="$(contents-hub --vault "$HOME/contents-vault" fetch-all)"
-python -c 'import json,sys; p=json.loads(sys.argv[1]); sys.exit(0 if p.get("ok") else 1)' "$OUT"
+python3 -c 'import json,sys; p=json.loads(sys.argv[1]); sys.exit(0 if p.get("ok") else 1)' "$OUT"
 SH
-chmod +x "$HOME/.hermes/scripts/contents-hub-fetch.sh"
+chmod +x "$HERMES_SCRIPTS_DIR/contents-hub-fetch.sh"
 
 hermes cron create "0 * * * *" \
   --script contents-hub-fetch.sh \
   --no-agent \
-  --profile <profile> \
+  --profile "$PROFILE" \
   --deliver telegram \
   --name contents-hub-fetch-watchdog
 ```
+
+### Production-Like No-Agent Topology
+
+For a channel that should feel alive throughout the day, use two separate
+Hermes no-agent cron jobs:
+
+| Job | Schedule | Delivery | Responsibility |
+| --- | --- | --- | --- |
+| Hourly fetch and notify | `0 * * * *` | Direct adapter send, empty stdout on success | Run `fetch-all`, detect newly inserted subscription items, send each matched item as its own message, then call `delivery record`. |
+| Daily digest | `0 9 * * *` | Hermes `--deliver origin` or a configured gateway target | Run `digest`, print a concise digest/failure report, and let Hermes deliver the script stdout. |
+| Optional exploration | User-approved cadence | Usually local or origin | Run `exploration run-all` or a specific exploration id only after the user has approved the recipe. |
+
+Keep the hourly fetch job silent when there are no new matched items. In
+Hermes no-agent mode, empty stdout means no message is delivered. Print only
+when the notification or mapping layer fails, or when the user explicitly wants
+health reports every run.
+
+The hourly per-card job is the one that enables reactions. The daily digest job
+can be useful without reaction mapping because it is a final report. If the user
+wants reactions on each digest card, send cards through the adapter flow instead
+of relying on final-response delivery.
+
+### Reference Hourly Adapter Script Shape
+
+Use this shape when Hermes should send each new card through `hermes send` and
+then persist the returned message id in contents-hub. For adapter delivery, use
+an explicit target such as `telegram:<chat_id>` or
+`telegram:<chat_id>:<thread_id>` so the script can record the same channel id
+that reactions will later contain.
+
+```python
+#!/usr/bin/env python3
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+
+VAULT = os.environ.get("CONTENTS_HUB_VAULT", os.path.expanduser("~/contents-vault"))
+DB = os.path.join(VAULT, ".contents-hub", "state.db")
+HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
+HERMES_SEND_TARGET = os.environ["HERMES_SEND_TARGET"]  # e.g. telegram:-1001234567890
+
+
+def scalar(sql, params=()):
+    with sqlite3.connect(DB) as conn:
+        return conn.execute(sql, params).fetchone()[0]
+
+
+def new_matched_subscription_items(after_id):
+    sql = """
+    select ri.id, ri.title, ri.url, coalesce(ri.content_summary, '') as summary
+    from raw_items ri
+    where ri.id > ?
+      and ri.origin = 'subscription'
+      and ri.subscription_id is not null
+      and coalesce(ri.url, '') != ''
+      and exists (select 1 from raw_item_lenses ril where ril.raw_item_id = ri.id)
+    order by ri.id asc
+    limit 20
+    """
+    with sqlite3.connect(DB) as conn:
+        conn.row_factory = sqlite3.Row
+        return [dict(row) for row in conn.execute(sql, (after_id,))]
+
+
+def target_parts():
+    parts = HERMES_SEND_TARGET.split(":")
+    platform = parts[0]
+    channel_id = parts[1] if len(parts) >= 2 else os.environ.get("HERMES_SEND_CHANNEL_ID", "")
+    thread_id = parts[2] if len(parts) >= 3 else ""
+    if not platform or not channel_id:
+        raise RuntimeError("HERMES_SEND_TARGET must include an explicit channel id for adapter delivery")
+    return platform, channel_id, thread_id
+
+
+def extract_message_id(payload):
+    candidates = [
+        payload,
+        payload.get("result") if isinstance(payload.get("result"), dict) else {},
+        payload.get("message") if isinstance(payload.get("message"), dict) else {},
+    ]
+    for obj in candidates:
+        for key in ("message_id", "messageId", "id", "ts"):
+            value = obj.get(key)
+            if value:
+                return str(value)
+    raise RuntimeError(f"could not find message id in hermes send result: {payload!r}")
+
+
+def format_message(item):
+    title = item.get("title") or item.get("url") or "Untitled"
+    summary = item.get("summary") or ""
+    url = item.get("url") or ""
+    return "\n".join(part for part in ["🆕 contents-hub", title, summary, url] if part)
+
+
+def send_platform_message(item):
+    proc = subprocess.run(
+        [
+            "hermes", "--profile", HERMES_PROFILE,
+            "send", "--to", HERMES_SEND_TARGET, "--json",
+            format_message(item),
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "hermes send failed").strip())
+    payload = json.loads(proc.stdout or "{}")
+    if payload.get("error") or not payload.get("success", True):
+        raise RuntimeError(f"hermes send returned failure: {payload!r}")
+    platform, channel_id, thread_id = target_parts()
+    return {
+        "platform": platform,
+        "channel_id": channel_id,
+        "thread_id": thread_id,
+        "message_id": extract_message_id(payload),
+    }
+
+
+def record_delivery(ref, raw_item_id):
+    subprocess.run(
+        [
+            "contents-hub", "--vault", VAULT,
+            "delivery", "record",
+            "--platform", ref["platform"],
+            "--channel-id", ref.get("channel_id", ""),
+            "--thread-id", ref.get("thread_id", ""),
+            "--message-id", ref["message_id"],
+            "--payload-type", "raw_item",
+            "--raw-item-id", str(raw_item_id),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def main():
+    before = int(scalar("select coalesce(max(id), 0) from raw_items") or 0)
+    proc = subprocess.run(
+        ["contents-hub", "--vault", VAULT, "fetch-all", "--timeout-per-sub", "180"],
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=1800,
+    )
+    if proc.returncode != 0:
+        print("contents-hub fetch-all failed")
+        print((proc.stdout or "")[-2000:])
+        print((proc.stderr or "")[-1000:])
+        return 0
+    try:
+        fetch_payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        print("contents-hub fetch-all returned non-JSON output")
+        print((proc.stdout or "")[-2000:])
+        return 0
+    if fetch_payload.get("ok") is False:
+        print(json.dumps(fetch_payload, ensure_ascii=False)[:3000])
+        return 0
+    for item in new_matched_subscription_items(before):
+        ref = send_platform_message(item)
+        record_delivery(ref, int(item["id"]))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(f"contents-hub hourly notification failed: {exc}")
+        raise SystemExit(0)
+```
+
+Install it as a Hermes no-agent cron after saving it in the target profile's
+Hermes scripts directory:
+
+```bash
+PROFILE="<profile>"
+if [ "$PROFILE" = "default" ]; then
+  HERMES_SCRIPTS_DIR="$HOME/.hermes/scripts"
+else
+  HERMES_SCRIPTS_DIR="$HOME/.hermes/profiles/$PROFILE/scripts"
+fi
+mkdir -p "$HERMES_SCRIPTS_DIR"
+# write the script above to "$HERMES_SCRIPTS_DIR/contents-hub-fetch-notify.py"
+
+hermes cron create "0 * * * *" \
+  --script contents-hub-fetch-notify.py \
+  --no-agent \
+  --profile "$PROFILE" \
+  --deliver origin \
+  --name contents-hub-fetch-hourly
+```
+
+Set `CONTENTS_HUB_VAULT`, `HERMES_PROFILE`, and `HERMES_SEND_TARGET` in the
+profile environment or script wrapper. Use `hermes cron create --help` and
+`hermes send --help` to confirm the exact script directory and delivery targets
+for the installed Hermes version.
 
 ### Daily Digest
 
@@ -243,6 +454,22 @@ contents-hub --vault "$HOME/contents-vault" interaction handle --event-json '<no
 
 The adapter must preserve platform message ids. Without `delivery record`, a
 later reaction cannot be mapped back to the original raw item or digest.
+
+If an older local setup wrote a custom Telegram mapping table directly, run any
+normal contents-hub command once against that vault after upgrading. The DB
+migration copies compatible `telegram_raw_item_messages` rows into the official
+`outbound_messages` table. New adapters should call `delivery record` instead
+of writing custom mapping tables.
+
+Reaction handling flow:
+
+1. Platform event arrives at Hermes, a bot, or another gateway.
+2. The gateway normalizes it into `platform`, `channel_id`, optional
+   `thread_id`, `message_id`, `user_id`, `kind`, and `value`.
+3. The gateway calls `contents-hub interaction handle --event-json '<json>'`.
+4. contents-hub looks up `outbound_messages`.
+5. `⭐`, `❤️`, and `❤` save and promote the raw item into a markdown source
+   document; `✅` marks read; `🗑` archives.
 
 ## Agent Checklist
 

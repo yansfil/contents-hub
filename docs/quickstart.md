@@ -13,7 +13,7 @@ Manual install:
 ```bash
 git clone https://github.com/yansfil/contents-hub
 cd contents-hub
-uv sync --all-extras
+uv sync
 ```
 
 For an editable command:
@@ -90,13 +90,14 @@ This smoke uses a demo platform. Real Telegram, Slack, or Discord transport is
 owned by an external gateway or agent runtime.
 
 ```bash
-contents-hub --vault ~/contents-vault deliver pending --format json
+PENDING="$(contents-hub --vault ~/contents-vault deliver pending --format json)"
+RAW_ITEM_ID="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(p["items"][0]["raw_item_id"])' "$PENDING")"
 contents-hub --vault ~/contents-vault delivery record \
   --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
   --payload-type raw_item \
-  --raw-item-id 1
+  --raw-item-id "$RAW_ITEM_ID"
 contents-hub --vault ~/contents-vault interaction handle \
   --platform demo \
   --channel-id demo-channel \

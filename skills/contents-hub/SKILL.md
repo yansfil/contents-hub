@@ -41,6 +41,11 @@ Runtime runbooks:
 - Generic scheduler boundary: `docs/schedulers.md`
 - Channel adapter contract: `docs/channels.md`
 
+For Hermes Telegram-style operation, distinguish final-response digest delivery
+from adapter delivery. Reactions only work when a per-card adapter preserves the
+returned platform message id with `delivery record` before forwarding events to
+`interaction handle`.
+
 Keep one public skill. Do not ask the user to install a separate init skill.
 Use this Setup Mode plus the runtime runbooks for installation and operations.
 
@@ -100,11 +105,15 @@ This repo stores the skill at `skills/contents-hub/SKILL.md`.
 
 ## Vault Targeting
 
-Every command accepts `--vault PATH`. Resolution order is:
+Every vault command except `init` accepts `--vault PATH`. Resolution order is:
 
 1. `--vault PATH`
 2. `CONTENTS_HUB_VAULT`
 3. current working directory
+
+`init` initializes its positional path. Pass the path explicitly:
+`contents-hub init "$HOME/contents-vault"` or
+`contents-hub --vault "$HOME/contents-vault" init "$HOME/contents-vault"`.
 
 For repo-outside usage:
 
@@ -313,13 +322,19 @@ summaries, and enough context for an adapter to send a channel message.
 Record a sent message:
 
 ```bash
+PENDING="$(contents-hub deliver pending --format json)"
+RAW_ITEM_ID="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(p["items"][0]["raw_item_id"])' "$PENDING")"
 contents-hub delivery record \
   --platform demo \
   --channel-id demo-channel \
   --message-id demo-message \
   --payload-type raw_item \
-  --raw-item-id 1
+  --raw-item-id "$RAW_ITEM_ID"
 ```
+
+For digest cards, use the `digest_id` from `deliver pending --payload-type
+digest --format json` and record with `--payload-type digest --digest-id
+<digest_id>`.
 
 List mappings:
 
@@ -402,10 +417,12 @@ Canonical source types:
 
 - `rss.feed`
 - `youtube.channel`
+- `github.releases`
 - `x.profile`
 - `linkedin.profile`
 - `threads.profile`
 - `substack.publication`
+- `substack.tag`
 - `medium.publication`
 - `reddit.subreddit`
 - `webpage`
@@ -421,7 +438,7 @@ or the command's JSON mode is used. Avoid parsing human-oriented text when a
 JSON option exists.
 
 When filtering JSON output in shell, avoid piping into a Python here-doc because
-the here-doc becomes Python stdin. Prefer `python -c`, a temp file, or calling
+the here-doc becomes Python stdin. Prefer `python3 -c`, a temp file, or calling
 the CLI from Python with `subprocess.check_output()`.
 
 ## Logs

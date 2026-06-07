@@ -19,11 +19,14 @@ The reliable first-success path is:
 
 ```bash
 git status --short --branch
-uv sync --all-extras
+uv sync
 uv run contents-hub --help
 uv run python -m contents_hub --help
 ./dev test
 ```
+
+Run `uv sync --extra claude --extra dev` when validating Claude-backed runner
+features or development tooling specifically.
 
 Run a fresh-checkout smoke outside the active checkout, then run a fresh-vault
 first-success smoke.
@@ -43,5 +46,5 @@ first-success smoke.
 - Release notes are drafted.
 - Launch tag is created or ready for human approval.
 - Follow-up issues exist for exact skill installer syntax, Slack adapter,
-  Discord adapter, Telegram/Hermes reference adapter, PyPI distribution, MCP
+  Discord adapter, packaged Telegram/Hermes adapter, PyPI distribution, MCP
   bridge, and extra agent runners.
