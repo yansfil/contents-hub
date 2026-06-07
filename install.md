@@ -149,6 +149,13 @@ contents-hub --vault "$HOME/contents-vault" delivery record ...
 contents-hub --vault "$HOME/contents-vault" interaction handle --event-json '<json>'
 ```
 
+For runtime-specific setup, use:
+
+- `docs/hermes-setup.md` for Hermes profiles, gateway, cron, Telegram delivery,
+  no-agent jobs, vault safety, and adapter delivery.
+- `docs/openclaw-setup.md` for OpenClaw skill scope, CLI install, task topology,
+  vault safety, and external gateway integration.
+
 ## Smoke Test
 
 Run this after installing or updating:

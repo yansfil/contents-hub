@@ -94,6 +94,8 @@ def test_launch_docs_keep_first_success_and_followups_clear():
     channels = (ROOT / "docs" / "channels.md").read_text(encoding="utf-8")
     launch = (ROOT / "docs" / "launch.md").read_text(encoding="utf-8")
     runtime_matrix = (ROOT / "docs" / "runtime-matrix.md").read_text(encoding="utf-8")
+    hermes_setup = (ROOT / "docs" / "hermes-setup.md").read_text(encoding="utf-8")
+    openclaw_setup = (ROOT / "docs" / "openclaw-setup.md").read_text(encoding="utf-8")
     skill = (ROOT / "skills" / "contents-hub" / "SKILL.md").read_text(encoding="utf-8")
 
     assert "Reliable first-launch path" in readme
@@ -107,7 +109,20 @@ def test_launch_docs_keep_first_success_and_followups_clear():
     assert "hermes skills install skills-sh/yansfil/contents-hub/skills/contents-hub --yes" in install
     assert "hermes cron create" in (ROOT / "docs" / "schedulers.md").read_text(encoding="utf-8")
     assert "Skill Registration Notes" in runtime_matrix
+    assert "docs/hermes-setup.md" in runtime_matrix
+    assert "docs/openclaw-setup.md" in runtime_matrix
+    assert "Profile-Aware Install" in hermes_setup
+    assert "Existing Vault Safety" in hermes_setup
+    assert "Recommended Cron Topology" in hermes_setup
+    assert "Adapter Delivery" in hermes_setup
+    assert "OpenClaw Setup Runbook" in openclaw_setup
+    assert "Runtime final response" in openclaw_setup
+    assert "Setup Mode" in skill
+    assert "Do not ask the user to install a separate init skill" in skill
     assert "version: 0.2.0" in skill
     assert "platform demo" in launch
-    public_launch_docs = readme + install + quickstart + channels + launch + runtime_matrix + skill
+    public_launch_docs = (
+        readme + install + quickstart + channels + launch + runtime_matrix
+        + hermes_setup + openclaw_setup + skill
+    )
     assert "contents-hub-explore" not in public_launch_docs

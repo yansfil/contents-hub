@@ -168,6 +168,8 @@ contents-hub web
 - [Quickstart](docs/quickstart.md)
 - [Architecture](docs/architecture.md)
 - [Runtime Matrix](docs/runtime-matrix.md)
+- [Hermes Setup](docs/hermes-setup.md)
+- [OpenClaw Setup](docs/openclaw-setup.md)
 - [Schedulers](docs/schedulers.md)
 - [Channels](docs/channels.md)
 - [Initialization](docs/initialization.md)

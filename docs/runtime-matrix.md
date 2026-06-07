@@ -23,6 +23,11 @@ The repo-local skill lives at `skills/contents-hub/SKILL.md`.
 - Other coding agents: register the same `SKILL.md` file or ask the agent to
   read it from the checkout, then let the CLI own behavior.
 
+Detailed runbooks:
+
+- `docs/hermes-setup.md`
+- `docs/openclaw-setup.md`
+
 ## Runner Selection
 
 The base install is runtime-neutral:

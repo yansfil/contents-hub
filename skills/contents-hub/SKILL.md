@@ -18,6 +18,32 @@ This skill is intentionally self-contained. If the CLI is not installed,
 install it from the public repo, then use the CLI for all operations. Do not
 require a second contents-hub skill for exploration design.
 
+## Setup Mode
+
+Use setup mode when the user asks to install contents-hub, initialize a vault,
+configure Hermes/OpenClaw, add cron jobs, configure gateway delivery, choose a
+browser profile, migrate an existing vault, or reset existing runtime state.
+
+Before changing runtime state:
+
+1. Identify the runtime: Hermes, OpenClaw, shell cron, launchd, Codex, Claude
+   Code, or another gateway.
+2. Confirm the vault path.
+3. Check whether `.contents-hub/state.db` already exists.
+4. Back up `state.db` before destructive or reset-like work.
+5. Inspect existing subscriptions, Lenses, and delivery mappings.
+6. Inspect existing runtime schedules before creating new ones.
+
+Runtime runbooks:
+
+- Hermes profile/gateway/cron setup: `docs/hermes-setup.md`
+- OpenClaw skill/task/gateway setup: `docs/openclaw-setup.md`
+- Generic scheduler boundary: `docs/schedulers.md`
+- Channel adapter contract: `docs/channels.md`
+
+Keep one public skill. Do not ask the user to install a separate init skill.
+Use this Setup Mode plus the runtime runbooks for installation and operations.
+
 ## First Check
 
 When accuracy matters, inspect the installed CLI before answering:
