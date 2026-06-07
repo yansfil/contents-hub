@@ -3,16 +3,12 @@
 Replaces the removed classify/promote pipeline with the smallest possible
 implementation: read the raw_item from SQLite, write a Markdown file with
 Obsidian frontmatter, flip the row's status to `promoted`, return the path.
-
-No lenses, no tagging, no content-fetching — whatever is stored in
-`raw_items.content_summary` is the body. For browser-fetched items the
-summary already contains the scraped content; for RSS/YouTube it's the
-feed summary.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import sqlite3
@@ -67,6 +63,76 @@ def _build_frontmatter(row: dict, sub_row: dict | None) -> Frontmatter:
     )
 
 
+def _clean_text(value: str | None) -> str:
+    text = (value or "").strip()
+    text = re.sub(r"\r\n?", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def _parse_bullets(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [_clean_text(str(item)) for item in parsed if _clean_text(str(item))]
+
+
+def _sameish(a: str, b: str) -> bool:
+    left = re.sub(r"\s+", " ", a or "").strip()
+    right = re.sub(r"\s+", " ", b or "").strip()
+    return bool(left and right and (left == right or left in right or right in left))
+
+
+def _lens_rows(conn: sqlite3.Connection, raw_item_id: int) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT lens_id, summary, bullets_json
+        FROM raw_item_lenses
+        WHERE raw_item_id = ?
+        ORDER BY lens_id
+        """,
+        (raw_item_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _build_body(row: dict, lenses: list[dict]) -> str:
+    title = row["title"] or row["url"]
+    summary = _clean_text(row.get("content_summary"))
+    content = _clean_text(row.get("body"))
+
+    parts = [f"# {title}"]
+    if summary:
+        parts += ["", "## Summary", "", summary]
+
+    lens_sections: list[str] = []
+    for lens in lenses:
+        lens_id = lens.get("lens_id") or "lens"
+        lens_summary = _clean_text(lens.get("summary"))
+        bullets = _parse_bullets(lens.get("bullets_json"))
+        include_summary = bool(lens_summary and not _sameish(lens_summary, summary))
+        if not include_summary and not bullets:
+            continue
+        lens_sections += ["", f"### {lens_id}"]
+        if include_summary:
+            lens_sections += ["", lens_summary]
+        if bullets:
+            lens_sections += [""] + [f"- {bullet}" for bullet in bullets]
+
+    if lens_sections:
+        parts += ["", "## Lens Notes"] + lens_sections
+
+    if content and not _sameish(content, summary):
+        parts += ["", "## Content", "", content]
+
+    parts += ["", f"Source: {row['url']}", ""]
+    return "\n".join(parts)
+
+
 def _promote_with_conn(
     config: WikiConfig, raw_item_id: int, conn: sqlite3.Connection
 ) -> Path:
@@ -89,8 +155,9 @@ def _promote_with_conn(
         if sr is not None:
             sub_row = dict(sr)
 
+    lenses = _lens_rows(conn, raw_item_id)
     fm = _build_frontmatter(row, sub_row)
-    body_md = (row.get("content_summary") or "").strip()
+    fm.lenses = [str(lens["lens_id"]) for lens in lenses if lens.get("lens_id")]
     title = row["title"] or row["url"]
 
     sources_dir = config.sources_path
@@ -98,12 +165,10 @@ def _promote_with_conn(
     filename = source_filename(title, row["url"], row["collected_at"])
     path = sources_dir / filename
 
-    body = f"# {title}\n\n"
-    if body_md:
-        body += f"> {body_md}\n\n"
-    body += f"Source: {row['url']}\n"
-
-    path.write_text(assemble_markdown(fm.to_dict(), body), encoding="utf-8")
+    path.write_text(
+        assemble_markdown(fm.to_dict(), _build_body(row, lenses)),
+        encoding="utf-8",
+    )
 
     conn.execute(
         "UPDATE raw_items SET status='promoted', updated_at=? WHERE id=?",

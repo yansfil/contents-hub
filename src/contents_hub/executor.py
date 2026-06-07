@@ -1426,9 +1426,9 @@ async def _youtube_content_from_pages(
         )
         title = _strip_youtube_suffix(title)
         summary = (
-            _html_meta_content(document, "og:description")
+            _json_field(document, "shortDescription")
+            or _html_meta_content(document, "og:description")
             or _html_meta_content(document, "description")
-            or _json_field(document, "shortDescription")
             or candidate.card_text
         )
         author = (

@@ -66,6 +66,7 @@ Default rules:
 
 | Reaction | Action |
 | --- | --- |
+| `👍` | `save_and_promote` |
 | `⭐` | `save_and_promote` |
 | `❤️` | `save_and_promote` |
 | `❤` | `save_and_promote` |

@@ -14,8 +14,9 @@ from contents_hub.db import get_db
 from contents_hub.promote import PromoteError, promote_raw_item, source_filename
 
 
-SAVE_AND_PROMOTE_REACTIONS = {"⭐", "❤️", "❤"}
+SAVE_AND_PROMOTE_REACTIONS = {"👍", "⭐", "❤️", "❤"}
 DEFAULT_REACTION_RULES = {
+    "👍": "save_and_promote",
     "⭐": "save_and_promote",
     "❤️": "save_and_promote",
     "❤": "save_and_promote",

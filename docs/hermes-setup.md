@@ -468,7 +468,7 @@ Reaction handling flow:
    `thread_id`, `message_id`, `user_id`, `kind`, and `value`.
 3. The gateway calls `contents-hub interaction handle --event-json '<json>'`.
 4. contents-hub looks up `outbound_messages`.
-5. `⭐`, `❤️`, and `❤` save and promote the raw item into a markdown source
+5. `👍`, `⭐`, `❤️`, and `❤` save and promote the raw item into a markdown source
    document; `✅` marks read; `🗑` archives.
 
 ## Agent Checklist

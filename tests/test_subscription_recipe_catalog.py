@@ -660,6 +660,7 @@ def test_youtube_content_uses_page_metadata_without_agent(monkeypatch):
             "body": (
                 '<meta property="og:title" content="Demo Video - YouTube">'
                 '<meta property="og:description" content="Demo summary">'
+                '"shortDescription":"Longer page description from YouTube initial data"'
                 '"ownerChannelName":"Example Channel"'
                 '"publishDate":"2026-05-13"'
             ),
@@ -683,7 +684,7 @@ def test_youtube_content_uses_page_metadata_without_agent(monkeypatch):
 
     assert result.ok is True
     assert result.items[0].title == "Demo Video"
-    assert result.items[0].summary == "Demo summary"
+    assert result.items[0].summary == "Longer page description from YouTube initial data"
     assert result.items[0].author == "Example Channel"
     assert result.items[0].published_at is not None
     assert result.items[0].extra["body_status"] == "metadata_only"

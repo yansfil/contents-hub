@@ -148,7 +148,7 @@ def test_reaction_save_promote_is_idempotent_and_logged(tmp_path):
         "message_id": "msg-1",
         "user_id": "user-1",
         "kind": "reaction",
-        "value": "⭐",
+        "value": "👍",
     }
     first = handle_interaction(cfg, event)
     second = handle_interaction(cfg, event)
@@ -156,6 +156,7 @@ def test_reaction_save_promote_is_idempotent_and_logged(tmp_path):
     assert first["ok"] is True
     assert first["saved"] is True
     assert first["promoted"] is True
+    assert first["action"] == "save_and_promote"
     assert second["status"] == "already_handled"
 
     with get_db(cfg) as conn:
@@ -169,6 +170,80 @@ def test_reaction_save_promote_is_idempotent_and_logged(tmp_path):
     assert event_count == 1
     assert status == "promoted"
     assert len(list(cfg.sources_path.glob("*.md"))) == 1
+
+
+def test_reaction_promote_writes_summary_lens_notes_and_content(tmp_path):
+    cfg = _cfg(tmp_path)
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db(cfg) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO raw_items
+                (url, title, body, origin, priority, status,
+                 content_summary, metadata_json, collected_at, updated_at)
+            VALUES (?, ?, ?, 'subscription', 100, 'raw', ?, '{}', ?, ?)
+            """,
+            (
+                "https://example.com/deep",
+                "Deep Item",
+                "Full captured content with extra detail.",
+                "Short public summary.",
+                now,
+                now,
+            ),
+        )
+        raw_item_id = int(cur.lastrowid)
+        conn.execute(
+            """
+            INSERT INTO lenses
+                (id, name, description, keywords, enabled, created_at, updated_at)
+            VALUES ('agent-tech', 'Agent Tech', '', '[]', 1, ?, ?)
+            """,
+            (now, now),
+        )
+        conn.execute(
+            """
+            INSERT INTO raw_item_lenses
+                (raw_item_id, lens_id, summary, bullets_json)
+            VALUES (?, 'agent-tech', ?, ?)
+            """,
+            (
+                raw_item_id,
+                "Lens-specific interpretation.",
+                json.dumps(["First implication.", "Second implication."]),
+            ),
+        )
+        conn.commit()
+    record_outbound_message(
+        cfg,
+        platform="telegram",
+        channel_id="chat-1",
+        message_id="msg-rich",
+        payload_type="raw_item",
+        raw_item_id=raw_item_id,
+    )
+
+    out = handle_interaction(
+        cfg,
+        {
+            "platform": "telegram",
+            "channel_id": "chat-1",
+            "message_id": "msg-rich",
+            "kind": "reaction",
+            "value": "⭐",
+        },
+    )
+
+    path = cfg.vault_path / out["path"]
+    content = path.read_text(encoding="utf-8")
+    assert "lenses:" in content
+    assert "- agent-tech" in content
+    assert "## Summary\n\nShort public summary." in content
+    assert "## Lens Notes" in content
+    assert "### agent-tech" in content
+    assert "Lens-specific interpretation." in content
+    assert "- First implication." in content
+    assert "## Content\n\nFull captured content with extra detail." in content
 
 
 def test_unknown_and_unsupported_interactions_are_safe_json(tmp_path):
