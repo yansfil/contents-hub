@@ -1,75 +1,85 @@
-# contents-hub
+<h1 align="center">contents-hub</h1>
 
-contents-hub is a local-first content inbox for people who want agents,
-schedulers, and chat channels to feed the same durable knowledge vault.
+<p align="center">
+  <strong>Save. Subscribe. Briefed by agents.</strong>
+</p>
 
-It stores subscriptions, raw items, Lens matches, digests, outbound delivery
-mappings, and interaction events in SQLite under a vault directory. You can run
-it from plain cron, launchd, Hermes, OpenClaw, Claude Code, Codex, or another
-loop. The runtime owns scheduling and channel transport; contents-hub owns the
-content state and actions.
+<p align="center">
+  A local-first content inbox for subscriptions, digests, Markdown vaults, and chat reactions.
+  <br />
+  Agents run the loop. contents-hub keeps the state.
+</p>
 
-## Launch Maturity
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111827"></a>
+  <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-0f766e">
+  <img alt="Storage" src="https://img.shields.io/badge/storage-SQLite%20%2B%20Markdown-2563eb">
+  <img alt="Runtime" src="https://img.shields.io/badge/runtime-agent--neutral-f59e0b">
+  <img alt="Local first" src="https://img.shields.io/badge/local--first-yes-14b8a6">
+</p>
 
-Reliable first-launch path:
+<p align="center">
+  <a href="#reliable-first-launch-path"><strong>Quickstart</strong></a>
+  ·
+  <a href="install.md"><strong>Install</strong></a>
+  ·
+  <a href="docs/hermes-setup.md"><strong>Hermes</strong></a>
+  ·
+  <a href="docs/channels.md"><strong>Channels</strong></a>
+</p>
 
-- Install the single `contents-hub` skill.
-- Let the agent install the local CLI from this repo.
-- Initialize a vault.
-- Add manual URL/text items for an immediate inbox digest, or create a Lens and
-  add RSS feeds.
-- Run `fetch-all`, `digest`, and the dashboard.
+<p align="center">
+  <img src="assets/readme/contents-hub-hero.png" alt="contents-hub routes feeds, videos, webpages, and chat reactions into a local SQLite and Markdown vault" width="100%" />
+</p>
 
-Optional or experimental paths:
+contents-hub gives coding agents and personal automation runtimes one durable
+place to put the web: subscriptions, fetched items, Lens matches, digests,
+outbound message mappings, reactions, and promoted Markdown source notes.
 
-- Browser-backed sources such as X, LinkedIn, Threads, and arbitrary web pages.
-- Exploration recipes.
-- External channel delivery through Telegram, Slack, Discord, Hermes, OpenClaw,
-  or another gateway.
+It is intentionally runtime-neutral. Hermes, OpenClaw, Claude Code, Codex,
+cron, launchd, or your own loop can own the clock and the channel. contents-hub
+owns the local vault, SQLite state, CLI contract, and content actions.
 
-contents-hub does not ship built-in Slack, Discord, or Telegram bot packages in
-the base install. External gateways send messages and call the contents-hub CLI
-contract.
+## What It Does
 
-## Features
+contents-hub is the missing content layer between sources, agents, schedulers,
+and chat surfaces.
 
-- Add manual URL/text items for the reliable first launch path, with an
-  automatic `manual-inbox` Lens when no Lens exists yet.
-- Subscribe to RSS feeds and route them through user-created Lenses.
-- Try YouTube, web, and browser/agent-backed sources as optional paths.
-- Add ad-hoc read-later URLs or text with `raw add`.
-- Route raw items through Lenses and produce digest notes.
-- Promote saved raw items into immutable `sources/*.md` notes.
-- Run a FastAPI dashboard for subscriptions, digests, saved items, and inboxes.
-- Open the dedicated `contents-hub` browser profile for manual sign-in.
-- Generate adapter-ready delivery payloads with `deliver pending`.
-- Record outbound message ids with `delivery record`.
-- Handle normalized reactions with `interaction handle`.
-- Use Telegram/Hermes as a reference integration shape and Slack/Discord
-  fixtures as channel contract examples.
+- Subscribe to RSS feeds, YouTube channels, webpages, and browser-backed sources.
+- Route collected items through **Lenses** so digests stay topic-aware.
+- Store everything locally in a vault with `.contents-hub/state.db` and
+  Markdown source notes.
+- Generate digest briefings from Lens-routed raw items.
+- Emit channel-ready cards with `deliver pending`.
+- Persist platform message ids with `delivery record`.
+- Turn reactions such as `👍`, `⭐`, and `❤️` into saved Markdown source notes
+  with `interaction handle`.
+- Let agents install, operate, and verify the system through one repo-local skill.
 
-## Product Concepts
+## Mental Model
 
-- **Vault**: a local directory that owns `.contents-hub/`, `sources/`, and
-  generated digest notes, for example `~/contents-vault`.
-- **Subscription**: a source definition with URL, type, schedule, and optional
-  collection guidance, such as an RSS feed or YouTube channel.
-- **Raw item**: an unprocessed collected item in SQLite, such as one article.
-- **Lens**: a routing rule that decides which raw items belong in a topic view
-  or digest, such as `ai-research`.
-- **Digest**: a DB-backed briefing built from Lens-routed raw items.
-- **Exploration**: a registered recipe for agent-assisted recurring research.
-- **Promotion**: turning a raw item into a source note.
-- **Source note**: an immutable Markdown file under `sources/`.
+```mermaid
+flowchart LR
+    A[Feeds, pages, videos, manual notes] --> B[contents-hub CLI]
+    B --> C[(Local SQLite state)]
+    C --> D[Lenses]
+    D --> E[Digests]
+    C --> F[deliver pending]
+    F --> G[Hermes, OpenClaw, cron, bot, or adapter]
+    G --> H[Telegram, Slack, Discord, email, etc.]
+    H --> I[reaction event]
+    I --> J[interaction handle]
+    J --> K[Markdown source note]
+    K --> L[Vault / sources]
+```
 
-## Install
+The runtime decides **when** to run and **where** to send messages. contents-hub
+decides **what content exists**, **what has already been delivered**, and **what
+a reaction should do**.
 
-Recommended: install the single `contents-hub` skill in your agent runtime,
-then ask the agent to install the CLI and initialize a vault. The skill points
-the agent at the public repo, installs the CLI when needed, and uses CLI
-commands for all product behavior.
+## Reliable first-launch path
 
-Manual CLI install:
+Install locally from the repo:
 
 ```bash
 git clone https://github.com/yansfil/contents-hub
@@ -78,71 +88,125 @@ uv sync
 uv run contents-hub --help
 ```
 
-For an editable CLI:
+Create a vault and run the smallest useful loop:
+
+```bash
+uv run contents-hub init ~/contents-vault
+uv run contents-hub --vault ~/contents-vault raw add "A pasted note" --title "Manual note"
+uv run contents-hub --vault ~/contents-vault digest
+uv run contents-hub --vault ~/contents-vault web --port 8585
+```
+
+Open `http://localhost:8585` for the local dashboard.
+
+For RSS, create a Lens first, then add a feed:
+
+```bash
+uv run contents-hub --vault ~/contents-vault lens create ai --name "AI" --keyword ai
+uv run contents-hub --vault ~/contents-vault sub add <rss-feed-url> --type rss.feed --title "Example"
+uv run contents-hub --vault ~/contents-vault fetch-all
+uv run contents-hub --vault ~/contents-vault digest
+```
+
+For a durable shell command outside the repo:
 
 ```bash
 uv tool install -e .
-contents-hub --help
+contents-hub --vault ~/contents-vault sub list
 ```
 
-The base install is runtime-neutral. Claude-backed browser/agent features are
-behind the `claude` optional extra:
+## Agent-First Install
+
+The recommended path is to install the single `contents-hub` skill in your
+agent runtime, then ask the agent to install the CLI, initialize or reuse a
+vault, add subscriptions, schedule fetches, and verify the flow.
+
+Hermes:
 
 ```bash
-uv sync --extra claude --extra dev
-CONTENTS_HUB_AGENT_RUNNER=claude-sdk contents-hub --help
+hermes skills install skills-sh/yansfil/contents-hub/skills/contents-hub --yes
 ```
 
-See [install.md](install.md) for the skill-first install contract, CLI fallback,
-runtime shape, and smoke tests.
-
-## Agent Skills
-
-contents-hub ships one repo-local skill so coding agents can install the CLI, pick
-the correct vault, add subscriptions, fetch content, design explorations, run
-digests, and wire channel interactions without re-reading the whole codebase.
-
-- [install.md](install.md) - skill-first setup, CLI fallback, smoke tests, and
-  runtime shape
-- [skills/contents-hub/SKILL.md](skills/contents-hub/SKILL.md) - CLI, vault,
-  subscription, exploration, digest, delivery, and interaction operations
-- [AGENTS.md](AGENTS.md) - repository guidance for coding agents
-
-Use `chromux` for browser-backed exploration when it is available. contents-hub
-does not require chromux for base RSS/manual/digest workflows.
-
-## Quickstart
+OpenClaw:
 
 ```bash
-contents-hub init ~/contents-vault
-contents-hub --vault ~/contents-vault raw add "A pasted note" --title "Manual note"
-contents-hub --vault ~/contents-vault digest
-contents-hub --vault ~/contents-vault web --port 8585
+git clone https://github.com/yansfil/contents-hub
+cd contents-hub
+openclaw skills install ./skills/contents-hub --as contents-hub --global
 ```
 
-Open `http://localhost:8585` for the dashboard.
+The skill is intentionally CLI-first. Agents should use commands such as
+`contents-hub sub add`, `fetch-all`, `digest`, `deliver pending`,
+`delivery record`, and `interaction handle` instead of inventing runtime-specific
+state.
 
-For RSS, create a Lens first, then add a real feed URL:
+See [install.md](install.md) for the full skill-first setup contract and smoke
+tests.
+
+## Channel Reactions
+
+contents-hub does not need to own your Telegram, Slack, or Discord bot. It only
+needs a channel adapter to preserve message ids.
 
 ```bash
-contents-hub --vault ~/contents-vault lens create ai --name "AI" --keyword ai
-contents-hub --vault ~/contents-vault sub add <rss-feed-url> --type rss.feed --title "Example"
-contents-hub --vault ~/contents-vault fetch-all
-contents-hub --vault ~/contents-vault digest
+contents-hub --vault ~/contents-vault deliver pending --format json
+
+# send the card with your runtime adapter, then record the platform message id
+contents-hub --vault ~/contents-vault delivery record \
+  --platform telegram \
+  --channel-id <chat_id> \
+  --message-id <message_id> \
+  --payload-type raw_item \
+  --raw-item-id <raw_item_id>
+
+# later, forward the normalized reaction event
+contents-hub --vault ~/contents-vault interaction handle \
+  --event-json '{"platform":"telegram","channel_id":"<chat_id>","message_id":"<message_id>","kind":"reaction","value":"👍"}'
 ```
 
-## Interaction Flow
+Default reactions:
 
-1. `contents-hub deliver pending --format json` emits item or digest cards.
-2. A channel adapter sends the card to Telegram, Slack, Discord, or another
-   surface.
-3. The adapter calls `contents-hub delivery record` with the returned message id.
-4. A user reacts in the channel.
-5. The adapter normalizes the event and calls `contents-hub interaction handle`.
-6. contents-hub logs the interaction and applies the configured action, such as
-   save-and-promote for `⭐` or `❤️`.
+| Reaction | Action |
+| --- | --- |
+| `👍`, `⭐`, `❤️`, `❤` | Save and promote the raw item into `sources/*.md` |
+| `✅` | Mark read |
+| `🗑` | Archive |
 
-## Core CLI
+This is the contract Hermes, OpenClaw, Slack, Discord, Telegram, or any custom
+adapter can implement.
+
+## Runtime Integrations
+
+| Runtime | Status | Notes |
+| --- | --- | --- |
+| Plain shell / cron / launchd | Ready | Run CLI commands on your own schedule. |
+| Hermes | Documented | Profile-aware setup, cron topology, and Telegram-style adapter flow. |
+| OpenClaw | Documented | Skill install and task/gateway setup runbook. |
+| Codex / Claude Code loops | Compatible | Use the CLI and skill; let the runtime own scheduling. |
+| Slack / Discord packaged bots | TODO | Channel contract is ready; packaged adapters are a follow-up. |
+
+Runtime docs:
+
+- [Hermes Setup](docs/hermes-setup.md)
+- [OpenClaw Setup](docs/openclaw-setup.md)
+- [Schedulers](docs/schedulers.md)
+- [Channels](docs/channels.md)
+- [Runtime Matrix](docs/runtime-matrix.md)
+
+## Core Concepts
+
+| Concept | Meaning |
+| --- | --- |
+| Vault | Local directory containing `.contents-hub/`, `sources/`, and generated notes. |
+| Subscription | A source definition: RSS feed, YouTube channel, webpage, browser source, etc. |
+| Raw item | One collected item in SQLite before promotion. |
+| Lens | A topic/routing rule that decides what belongs in a digest or inbox. |
+| Digest | A briefing generated from Lens-routed raw items. |
+| Delivery mapping | Platform message id recorded for later reaction handling. |
+| Interaction | A normalized channel event such as a reaction. |
+| Source note | Immutable Markdown document under `sources/`. |
+
+## CLI Cheatsheet
 
 ```text
 contents-hub init
@@ -163,17 +227,51 @@ contents-hub interaction handle|rules list
 contents-hub web
 ```
 
+## Browser Profile
+
+For login-required sources, open the dedicated `contents-hub` Chrome profile and
+sign in manually:
+
+```bash
+contents-hub --vault ~/contents-vault browser open
+contents-hub --vault ~/contents-vault browser status
+```
+
+The profile is fixed to `contents-hub`. contents-hub does not store passwords or
+site tokens.
+
+## Maturity
+
+Reliable today:
+
+- Manual notes and read-later URLs
+- RSS feeds with user-created Lenses
+- YouTube/page metadata collection where available
+- SQLite-backed digests and dashboard
+- Delivery mappings and normalized reaction handling
+- Markdown source promotion
+- Hermes/OpenClaw setup documentation
+
+Experimental or adapter-dependent:
+
+- Login-required browser-backed social sources
+- Exploration recipes
+- Packaged Slack/Discord/Telegram bot adapters
+- MCP bridge and additional agent runners
+
 ## Documentation
 
 - [Quickstart](docs/quickstart.md)
+- [Install](install.md)
 - [Architecture](docs/architecture.md)
+- [Initialization](docs/initialization.md)
 - [Runtime Matrix](docs/runtime-matrix.md)
 - [Hermes Setup](docs/hermes-setup.md)
 - [OpenClaw Setup](docs/openclaw-setup.md)
 - [Schedulers](docs/schedulers.md)
 - [Channels](docs/channels.md)
-- [Initialization](docs/initialization.md)
 - [Launch Checklist](docs/launch.md)
+- [Skill](skills/contents-hub/SKILL.md)
 
 ## License
 
