@@ -35,6 +35,8 @@
 contents-hub gives coding agents and personal automation runtimes one durable
 place to put the web: subscriptions, fetched items, Lens matches, digests,
 outbound message mappings, reactions, and promoted Markdown source notes.
+Promoted notes under `sources/` are processed summaries; full captured text
+stays in SQLite `raw_items.body` for reprocessing.
 
 It is intentionally runtime-neutral. Hermes, OpenClaw, Claude Code, Codex,
 cron, launchd, or your own loop can own the clock and the channel. contents-hub
@@ -48,7 +50,7 @@ and chat surfaces.
 - Subscribe to RSS feeds, YouTube channels, webpages, and browser-backed sources.
 - Route collected items through **Lenses** so digests stay topic-aware.
 - Store everything locally in a vault with `.contents-hub/state.db` and
-  Markdown source notes.
+  processed Markdown source notes.
 - Generate digest briefings from Lens-routed raw items.
 - Emit channel-ready cards with `deliver pending`, or run collection plus card
   selection in one JSON-only call with `deliver prepare --collect fetch-all`.
@@ -178,7 +180,7 @@ Default reactions:
 
 | Reaction | Action |
 | --- | --- |
-| `👍`, `⭐`, `❤️`, `❤` | Save and promote the raw item into `sources/*.md` |
+| `👍`, `⭐`, `❤️`, `❤` | Save and promote the raw item into a processed summary note under `sources/*.md` |
 | `✅` | Mark read |
 | `🗑` | Archive |
 
@@ -209,12 +211,12 @@ Runtime docs:
 | --- | --- |
 | Vault | Local directory containing `.contents-hub/`, `sources/`, and generated notes. |
 | Subscription | A source definition: RSS feed, YouTube channel, webpage, browser source, etc. |
-| Raw item | One collected item in SQLite before promotion. |
+| Raw item | One collected item in SQLite before promotion; `raw_items.body` keeps the full captured body for reprocessing. |
 | Lens | A topic/routing rule that decides what belongs in a digest or inbox. |
 | Digest | A briefing generated from Lens-routed raw items. |
 | Delivery mapping | Platform message id recorded for later reaction handling. |
 | Interaction | A normalized channel event such as a reaction. |
-| Source note | Immutable Markdown document under `sources/`. |
+| Source note | Immutable processed summary Markdown document under `sources/`; it does not dump full raw page text or transcripts. |
 
 ## CLI Cheatsheet
 

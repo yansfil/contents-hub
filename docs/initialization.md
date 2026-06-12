@@ -43,6 +43,9 @@ The vault receives:
   sources/
 ```
 
+`sources/` contains processed summary notes. Full fetched or pasted bodies stay
+in SQLite `raw_items.body` for later reprocessing.
+
 Vault configuration uses `.contents-hub.yaml` when present.
 
 ## 3. Target The Same Vault From Anywhere

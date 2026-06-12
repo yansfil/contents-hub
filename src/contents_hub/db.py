@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS raw_items (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     url             TEXT NOT NULL,                         -- canonical key: normalized URL or content://<sub>/<hash>
     title           TEXT NOT NULL DEFAULT '',
-    body            TEXT NOT NULL DEFAULT '',              -- full body/transcript (≤2000 chars per recipe)
+    body            TEXT NOT NULL DEFAULT '',              -- full body/transcript for reprocessing
     origin          TEXT NOT NULL DEFAULT 'subscription', -- manual / subscription / agent / exploration
     priority        INTEGER NOT NULL DEFAULT 50,          -- manual=100, subscription=50, agent=30
     status          TEXT NOT NULL DEFAULT 'raw',           -- raw / promoted / archived

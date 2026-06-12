@@ -19,6 +19,11 @@ The vault stores user-owned content and local runtime state.
 SQLite owns subscriptions, schedules, raw items, Lenses, digests, saved items,
 outbound message mappings, and interaction events.
 
+Promoted files under `sources/` are processed summary notes for human reading.
+Full captured page text, transcripts, and raw HTML fragments stay in SQLite
+`raw_items.body` so items can be reprocessed without dumping raw capture into
+the Obsidian vault.
+
 ## 2. Collection And Digest
 
 Subscriptions and manual raw items become rows in `raw_items`. Lenses attach
