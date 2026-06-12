@@ -12,6 +12,7 @@ from contents_hub.config import WikiConfig
 from contents_hub.db import get_db, init_db
 from contents_hub.delivery import pending_delivery_payload, prepare_delivery_payload
 from contents_hub.interactions import handle_interaction, record_outbound_message
+from contents_hub.promote import promote_raw_item
 
 
 def _cfg(tmp_path) -> WikiConfig:
@@ -368,7 +369,7 @@ def test_reaction_save_promote_is_idempotent_and_logged(tmp_path):
     assert len(list(cfg.sources_path.glob("*.md"))) == 1
 
 
-def test_reaction_promote_writes_summary_lens_notes_and_content(tmp_path):
+def test_reaction_promote_writes_processed_summary_note(tmp_path):
     cfg = _cfg(tmp_path)
     now = datetime.now(timezone.utc).isoformat()
     with get_db(cfg) as conn:
@@ -382,8 +383,10 @@ def test_reaction_promote_writes_summary_lens_notes_and_content(tmp_path):
             (
                 "https://example.com/deep",
                 "Deep Item",
-                "Full captured content with extra detail.",
-                "Short public summary.",
+                "<main><nav>Page chrome</nav><p>Full captured "
+                "<em>content</em> with extra detail.</p>"
+                "<div>Second clean point.</div></main>",
+                "<p>Short <strong>public</strong> summary.</p>",
                 now,
                 now,
             ),
@@ -405,8 +408,10 @@ def test_reaction_promote_writes_summary_lens_notes_and_content(tmp_path):
             """,
             (
                 raw_item_id,
-                "Lens-specific interpretation.",
-                json.dumps(["First implication.", "Second implication."]),
+                "<p>Lens-specific <b>interpretation</b>.</p>",
+                json.dumps(
+                    ["<span>First implication.</span>", "<li>Second implication.</li>"]
+                ),
             ),
         )
         conn.commit()
@@ -432,14 +437,131 @@ def test_reaction_promote_writes_summary_lens_notes_and_content(tmp_path):
 
     path = cfg.vault_path / out["path"]
     content = path.read_text(encoding="utf-8")
+    assert "raw_item_id:" in content
+    assert f"raw_item_id: {raw_item_id}" in content
     assert "lenses:" in content
     assert "- agent-tech" in content
-    assert "## Summary\n\nShort public summary." in content
+    assert "## 한줄 요약\n\nShort public summary." in content
+    assert "## 핵심 내용" in content
+    assert "- First implication." in content
+    assert "- Second implication." in content
     assert "## Lens Notes" in content
     assert "### agent-tech" in content
     assert "Lens-specific interpretation." in content
-    assert "- First implication." in content
-    assert "## Content\n\nFull captured content with extra detail." in content
+    assert "## Source" in content
+    assert f"- Raw item id: {raw_item_id}" in content
+    assert "`raw_items.body`" in content
+    assert "## Content" not in content
+    assert "Page chrome" not in content
+    assert "<p" not in content
+    assert "<div" not in content
+    assert "<strong" not in content
+    assert "<li" not in content
+
+
+def test_promoted_source_note_does_not_dump_long_body(tmp_path):
+    cfg = _cfg(tmp_path)
+    now = datetime.now(timezone.utc).isoformat()
+    long_body = "A" * 13050
+    with get_db(cfg) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO raw_items
+                (url, title, body, origin, priority, status,
+                 content_summary, metadata_json, collected_at, updated_at)
+            VALUES (?, ?, ?, 'manual', 100, 'raw', ?, '{}', ?, ?)
+            """,
+            (
+                "https://example.com/long",
+                "Long Item",
+                long_body,
+                "Useful summary.",
+                now,
+                now,
+            ),
+        )
+        raw_item_id = int(cur.lastrowid)
+    record_outbound_message(
+        cfg,
+        platform="telegram",
+        channel_id="chat-1",
+        message_id="msg-long",
+        payload_type="raw_item",
+        raw_item_id=raw_item_id,
+    )
+
+    out = handle_interaction(
+        cfg,
+        {
+            "platform": "telegram",
+            "channel_id": "chat-1",
+            "message_id": "msg-long",
+            "kind": "reaction",
+            "value": "⭐",
+        },
+    )
+
+    content = (cfg.vault_path / out["path"]).read_text(encoding="utf-8")
+    assert "## 한줄 요약\n\nUseful summary." in content
+    assert "## 핵심 내용" in content
+    assert "## Source" in content
+    assert "## Content" not in content
+    assert "Content Excerpt" not in content
+    assert "A" * 300 not in content
+    assert len(content) < 2000
+
+
+def test_direct_promote_and_reaction_promote_use_same_renderer(tmp_path):
+    cfg_direct = _cfg(tmp_path / "direct")
+    cfg_reaction = _cfg(tmp_path / "reaction")
+    collected_at = "2026-01-02T03:04:05+00:00"
+
+    def seed(cfg: WikiConfig) -> int:
+        with get_db(cfg) as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO raw_items
+                    (url, title, body, origin, priority, status,
+                     content_summary, metadata_json, collected_at, updated_at)
+                VALUES (?, ?, ?, 'manual', 100, 'raw', '', '{}', ?, ?)
+                """,
+                (
+                    "https://example.com/same",
+                    "Same Item",
+                    "Opening paragraph explains the useful idea. "
+                    "Second sentence adds context.",
+                    collected_at,
+                    collected_at,
+                ),
+            )
+            return int(cur.lastrowid)
+
+    direct_id = seed(cfg_direct)
+    reaction_id = seed(cfg_reaction)
+    direct_path = promote_raw_item(cfg_direct, direct_id)
+    record_outbound_message(
+        cfg_reaction,
+        platform="telegram",
+        channel_id="chat-1",
+        message_id="msg-same",
+        payload_type="raw_item",
+        raw_item_id=reaction_id,
+    )
+    out = handle_interaction(
+        cfg_reaction,
+        {
+            "platform": "telegram",
+            "channel_id": "chat-1",
+            "message_id": "msg-same",
+            "kind": "reaction",
+            "value": "⭐",
+        },
+    )
+    reaction_path = cfg_reaction.vault_path / out["path"]
+
+    assert direct_path.read_text(encoding="utf-8") == reaction_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_unknown_and_unsupported_interactions_are_safe_json(tmp_path):

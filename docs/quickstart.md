@@ -37,6 +37,9 @@ This creates:
   sources/
 ```
 
+`sources/` stores processed summary notes. Full fetched or pasted bodies remain
+in SQLite `raw_items.body` for reprocessing.
+
 ## 3. Add Content
 
 Manual URL/text is the shortest first-launch path. If no explicit Lens is

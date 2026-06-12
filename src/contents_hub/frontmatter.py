@@ -20,6 +20,7 @@ Source files (``sources/``)::
     tags          list[str]  Obsidian #tags (without ``#``)
     lenses        list[str]  Lens IDs this item belongs to
     status        str        pending | compiled | skipped
+    raw_item_id   int        SQLite raw_items.id for reprocessing
 
 Wiki pages::
 

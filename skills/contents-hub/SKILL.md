@@ -142,6 +142,9 @@ digested. RSS is reliable after the user creates at least one matching Lens.
 Treat browser-backed social sources and explorations as optional paths that may
 need manual browser sign-in.
 
+Promotion writes processed summary notes under `sources/`. Full fetched or
+pasted bodies stay in SQLite `raw_items.body` for later reprocessing.
+
 List subscriptions:
 
 ```bash
